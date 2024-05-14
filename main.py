@@ -82,11 +82,11 @@ if __name__ == "__main__":
     conn = sqlite3.connect(bot.db_location)
     c = conn.cursor()
     c.execute("CREATE TABLE IF NOT EXISTS embeds (embed_id INTEGER PRIMARY KEY NOT NULL,"
-              "embed_text VARCHAR(32), owner_id INT);")
+              "data TEXT NOT NULL, guild_id INT NOT NULL, name TEXT NOT NULL);")
     c.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY NOT NULL,"
-              "permissions STR);")
+              "permissions TEXT);")
     c.execute("CREATE TABLE IF NOT EXISTS guilds (guild_id INTEGER PRIMARY KEY NOT NULL,"
-              "settings STR);")
+              "settings TEXT);")
     conn.commit()
     conn.close()
     logging.info("Starting bot")
