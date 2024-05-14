@@ -51,7 +51,7 @@ intents = discord.Intents.default().all()
 # bot = commands.AutoShardedBot(intents=intents, debug_guilds=[867773426773262346, 410980591476015104])
 bot = commands.AutoShardedBot(intents=intents, debug_guilds=[867773426773262346, ])
 bot.logger = logger
-bot.db_location = 'data.db'
+bot.db_location = os.getenv('DATABASE_LOCATION')
 for filename in os.listdir('./cogs'):
     if filename.endswith('.py') and filename.startswith('cog_'):
         bot.load_extension(f'cogs.{filename[:-3]}')
