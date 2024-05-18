@@ -86,7 +86,9 @@ if __name__ == "__main__":
     c.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY NOT NULL,"
               "permissions TEXT);")
     c.execute("CREATE TABLE IF NOT EXISTS guilds (guild_id INTEGER PRIMARY KEY NOT NULL,"
-              "settings TEXT);")
+              "settings TEXT, thread_channels TEXT);")
+    c.execute("CREATE TABLE IF NOT EXISTS threads (thread_id INTEGER PRIMARY KEY NOT NULL,"
+              "channel_id INT NOT NULL, note TEXT, note_id INTEGER, note_last_update INTEGER);")
     conn.commit()
     conn.close()
     logging.info("Starting bot")
