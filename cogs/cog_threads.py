@@ -1,3 +1,4 @@
+import json
 import logging
 
 import discord
@@ -30,6 +31,29 @@ class NoteModal(discord.ui.Modal):
         return True
 
 
+class DefaultNoteModal(NoteModal):
+    def __init__(self, note, db_location, *args, **kwargs) -> None:
+        super().__init__(note=note, db_location=db_location, *args, **kwargs)
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        new_note = interaction.data["components"][0]["components"][0]["value"]
+        async with aiosqlite.connect(self.db_location) as db:
+            await db.execute("UPDATE guilds SET settings = ? WHERE guild_id = ?",
+                             (json.dumps({"defaultNote": new_note}), interaction.guild.id))
+            await db.commit()
+        em = await util.build_forum_embed(note=new_note)
+        await interaction.followup.send("Default note has been modified!", ephemeral=True, delete_after=15, embed=em)
+        return True
+
+
+async def button_edit_note_callback(self, interaction: discord.Interaction):
+    note = await util.get_note(interaction.channel)
+    modal = NoteModal(title=f"Edit note for {interaction.channel.name}", note=note[0] if note else "No note found",
+                      db_location=self.bot.db_location)
+    await interaction.response.send_modal(modal)
+
+
 class Threads(commands.Cog):
     def __init__(self, bot, logger):
         self.bot = bot
@@ -40,12 +64,6 @@ class Threads(commands.Cog):
 
     forum = discord.SlashCommandGroup(name="forum", description="Commands for managing forum posts")
 
-    async def button_edit_note_callback(self, interaction: discord.Interaction):
-        note = await util.get_note(interaction.channel)
-        modal = NoteModal(title=f"Edit note for {interaction.channel.name}", note=note[0] if note else "No note found",
-                          db_location=self.bot.db_location)
-        await interaction.response.send_modal(modal)
-
     @tasks.loop(minutes=5)
     async def update_notes(self):
         async with aiosqlite.connect(self.bot.db_location) as db:
@@ -53,13 +71,20 @@ class Threads(commands.Cog):
                 threads = await cursor.fetchall()
         view = discord.ui.View()
         button = discord.ui.Button(label="Edit Note", style=discord.ButtonStyle.primary)
-        button.callback = self.button_edit_note_callback
+        button.callback = button_edit_note_callback
         view.add_item(button)
         for thread in threads:
             t = self.bot.get_channel(thread[0])
-            m = await t.fetch_message(thread[1])
-            embed = await util.build_forum_embed(t)
-            await m.edit(embed=embed, content=None, view=view)
+            if not t:
+                await db.execute("DELETE FROM threads WHERE thread_id = ?", (thread[0],))
+                await db.commit()
+                continue
+            else:
+                m = await t.fetch_message(thread[1])
+                embed = await util.build_forum_embed(t)
+                if embed.description == m.embeds[0].description:
+                    continue
+                await m.edit(embed=embed, content=None, view=view)
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -71,13 +96,11 @@ class Threads(commands.Cog):
             self.logger.info(f"New thread in forum: {thread.parent.name}, {thread.name}")
             m = await thread.send("Welcome to the thread! This message will be updated when I receive information from "
                                   "the database!")
+            # get the default note
+            settings = await util.get_settings(thread.guild)
             async with aiosqlite.connect(self.bot.db_location) as db:
                 await db.execute("INSERT INTO threads (thread_id, channel_id, note, note_id, note_last_update) VALUES "
-                                 "(?, ?, ?, ?, ?);", (thread.id, thread.parent.id, "Hello! This space can be used to "
-                                                                                   "keep notes about the current "
-                                                                                   "project in this thread. To edit "
-                                                                                   "this note please use the `/forum "
-                                                                                   "note` command.", m.id,
+                                 "(?, ?, ?, ?, ?);", (thread.id, thread.parent.id, settings["defaultNote"], m.id,
                                                       util.time_since_epoch()))
                 await db.commit()
 
@@ -122,6 +145,14 @@ class Threads(commands.Cog):
             return
         modal = NoteModal(title=f"Edit note for {ctx.channel.parent.name}", note=note[0] if note else "No note found",
                           db_location=self.bot.db_location)
+        await ctx.send_modal(modal)
+
+    # add a command to change the default note
+    @forum.command(name="default_note", description="Change the default note for a forum thread")
+    async def default_note(self, ctx: discord.ApplicationContext):
+        settings = await util.get_settings(ctx.guild)
+        modal = DefaultNoteModal(title="Edit default note", note=settings["defaultNote"],
+                                 db_location=self.bot.db_location)
         await ctx.send_modal(modal)
 
 

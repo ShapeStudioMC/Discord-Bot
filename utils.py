@@ -4,6 +4,9 @@ import aiosqlite as sqlite
 import discord
 import datetime
 
+DEFAULT_SETTINGS = {"defaultNote": "Hello! This space can be used to keep notes about the current project in this "
+                                   "thread. To edit this note please use the `/forum note` command."}
+
 
 def convert_permission(permissions: str | dict) -> dict | str:
     """
@@ -97,7 +100,8 @@ async def get_note(thread: discord.Thread):
     :return: The note for the thread
     """
     async with sqlite.connect(os.getenv('DATABASE_LOCATION')) as db:
-        async with db.execute("SELECT note, note_last_update, note_id FROM threads WHERE thread_id = ?", (thread.id,)) as cursor:
+        async with db.execute("SELECT note, note_last_update, note_id FROM threads WHERE thread_id = ?",
+                              (thread.id,)) as cursor:
             note = await cursor.fetchone()
     if note:
         return note[0], note[1], note[2]
@@ -114,14 +118,20 @@ def to_discord_timestamp(timestamp: int):
     return f"<t:{round(timestamp)}:f>"
 
 
-async def build_forum_embed(thread: discord.Thread):
+async def build_forum_embed(thread: discord.Thread = None, note: str = None):
     """
     Build an embed for a forum post
-    :param thread: The thread to build the embed for
+    :param note: The note to use for the embed
+    :param thread: The thread to build the embed for if note is None
     :return: The embed
     """
     # get note information from the database
-    note = await get_note(thread)
+    if note is None and thread is not None:
+        note = await get_note(thread)
+    elif thread is None:
+        note = (note, time_since_epoch(), None)
+    else:
+        raise ValueError("You must provide either a thread or a note")
     embed = discord.Embed(title="📝 Notes", description=note[0], color=0x17e670)
     try:
         embed.add_field(name=f"Last updated",
@@ -140,3 +150,19 @@ def is_forum_post(ctx, thread: discord.Thread):
     """
     forum_channels = get_forum_channels(ctx.guild)
     return thread.id in forum_channels
+
+
+async def get_settings(guild: discord.Guild):
+    """
+    Get the settings for a guild
+    :param guild: The guild to get the settings for
+    :return: The settings for the guild
+    """
+    async with sqlite.connect(os.getenv('DATABASE_LOCATION')) as db:
+        async with db.execute("SELECT settings FROM guilds WHERE guild_id = ?", (guild.id,)) as cursor:
+            settings = await cursor.fetchone()
+            if settings is None:
+                await db.execute("INSERT INTO guilds (guild_id, settings, thread_channels) VALUES (?, ?, ?)",
+                                 (guild.id, json.dumps(DEFAULT_SETTINGS), ""))
+                await db.commit()
+            return json.loads(settings[0]) if settings[0] != "" or settings[0] is None else DEFAULT_SETTINGS

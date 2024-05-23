@@ -5,6 +5,8 @@ from discord import option
 from discord.ext import commands
 import utils
 
+from cogs.cog_threads import button_edit_note_callback
+
 
 class admin_cog(commands.Cog):
     def __init__(self, bot, logger):
@@ -43,7 +45,7 @@ class admin_cog(commands.Cog):
 
     @permissions.command(name="modify", description="Invert a user's permission.")
     @option(name="permission", description="The permission you want to grant/revoke", required=True,
-            choices=["manage_local_permissions", "manage_embeds"])
+            choices=["manage_local_permissions", "manage_embeds", "manage_threads"])
     async def modify(self, ctx: discord.ApplicationContext, member: discord.Member, permission: str):
         if await utils.has_permission(ctx.author.id, "manage_local_permissions", self.bot.db_location):
             async with sqlite.connect(self.bot.db_location) as db:
@@ -85,18 +87,26 @@ class admin_cog(commands.Cog):
 
     @forum.command(name="update", description="Update the notes in all forum threads")
     async def update(self, ctx: discord.ApplicationContext):
+        await ctx.defer()
         if not await utils.has_permission(ctx.author.id, "manage_threads", self.bot.db_location):
             await ctx.respond("You do not have permission to manage threads", ephemeral=True)
             return
         async with sqlite.connect(self.bot.db_location) as db:
             async with db.execute("SELECT thread_id, note_id FROM threads") as cursor:
                 threads = await cursor.fetchall()
+        view = discord.ui.View()
+        button = discord.ui.Button(label="Edit Note", style=discord.ButtonStyle.primary)
+        button.callback = button_edit_note_callback
+        view.add_item(button)
         for thread in threads:
             t = self.bot.get_channel(thread[0])
             m = await t.fetch_message(thread[1])
             embed = await utils.build_forum_embed(t)
-            await m.edit(embed=embed)
-        await ctx.respond("Notes updated", ephemeral=True)
+            await m.edit(embed=embed, content=None, view=view)
+        try:
+            await ctx.respond("Notes updated", ephemeral=True)
+        except discord.errors.NotFound:
+            pass
 
     @commands.Cog.listener()
     async def on_ready(self):
