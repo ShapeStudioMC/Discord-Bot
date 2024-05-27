@@ -3,9 +3,15 @@ import os
 import aiosqlite as sqlite
 import discord
 import datetime
+import dotenv
 
-DEFAULT_SETTINGS = {"defaultNote": "Hello! This space can be used to keep notes about the current project in this "
-                                   "thread. To edit this note please use the `/forum note` command."}
+DEFAULT_SETTINGS = {
+    "defaultNote": {"default": "Hello! This space can be used to keep notes about the current project in this "
+                               "thread. To edit this note please use the `/forum note` command. If you would like to"
+                               "change what this message says by default please use the `/forum default_note` command."}
+}
+
+dotenv.load_dotenv()
 
 
 def convert_permission(permissions: str | dict) -> dict | str:
@@ -75,7 +81,6 @@ async def get_forum_channels(guild: discord.Guild):
             for channel in thread_channels.split(","):
                 forum_channels.append(int(channel))
         except ValueError:
-            # there are no channels in the database
             pass
     else:
         async with sqlite.connect(os.getenv('DATABASE_LOCATION')) as db:
@@ -166,3 +171,19 @@ async def get_settings(guild: discord.Guild):
                                  (guild.id, json.dumps(DEFAULT_SETTINGS), ""))
                 await db.commit()
             return json.loads(settings[0]) if settings[0] != "" or settings[0] is None else DEFAULT_SETTINGS
+
+
+def limit(string: str, limit: int):
+    """
+    Limit the length of a string
+    :param string: The string to limit
+    :param limit: The limit of the string
+    :return: The limited string
+    """
+    if len(string) > limit:
+        return string[:limit - 3] + "..."
+    return string
+
+
+def get_db_location():
+    return os.getenv('DATABASE_LOCATION')
