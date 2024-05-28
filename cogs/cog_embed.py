@@ -9,6 +9,24 @@ import sqlite3
 import aiosqlite
 import utils
 
+from cogs.cog_threads import NoteModal
+
+
+class EditEmbedModal(NoteModal):
+    def __init__(self, embed, embed_name, db_location, *args, **kwargs) -> None:
+        super().__init__(note=embed, db_location=db_location, *args, **kwargs)
+        self.embed_name = embed_name
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        new_embed = interaction.data["components"][0]["components"][0]["value"]
+        async with aiosqlite.connect(self.db_location) as db:
+            await db.execute("UPDATE embeds SET data = ? WHERE name = ?",
+                             (new_embed, self.embed_name))
+            await db.commit()
+        await interaction.followup.send("Embed updated!", ephemeral=True, delete_after=5)
+        return True
+
 
 class embed_cog(commands.Cog):
     def __init__(self, bot, logger):
@@ -179,6 +197,51 @@ class embed_cog(commands.Cog):
                     await ctx.respond(f"Embed with the name of {name} has been deleted.", ephemeral=True)
                     return True
             await ctx.respond(f"Could not find embed with the name of {name}.", ephemeral=True)
+
+    @embed.command(name="edit", description="Edit an embed")
+    @option(name="name", description="The name of the embed", required=False)
+    async def edit(self, ctx: discord.ApplicationContext, name: str):
+        async def edit_callback(interaction: discord.Interaction):
+            # await interaction.response.defer()
+            if interaction.user.id == ctx.author.id:
+                name = interaction.data["values"][0]
+                async with aiosqlite.connect(self.bot.db_location) as db:
+                    async with db.execute("SELECT data FROM embeds WHERE name = ? AND guild_id = ?",
+                                          (name, ctx.guild.id)) as cursor:
+                        data = await cursor.fetchone()
+                modal = EditEmbedModal(embed=data[0], embed_name=name, db_location=self.bot.db_location,
+                                       title=f"Edit embed for {utils.limit(name, 45)}")
+                await interaction.response.send_modal(modal)
+                return True
+
+        if await utils.has_permission(ctx.author.id, "manage_embeds", self.bot.db_location):
+            if name is None or name == "":
+                view = discord.ui.View()
+                avalible_embeds = self.build_embed_choices(ctx.guild.id)
+                options = []
+                for embed in avalible_embeds:
+                    option = discord.SelectOption(label=embed, value=embed)
+                    options.append(option)
+                select = discord.ui.Select(select_type=discord.ComponentType.string_select,
+                                           placeholder="Select an embed",
+                                           options=options)
+                select.callback = edit_callback
+                view.add_item(select)
+                embed = discord.Embed(title="No embed provided!")
+                await ctx.respond(embed=embed, view=view, ephemeral=True)
+                return
+            elif (name != "" and name is not None) and not re.match(self.name_regex, name):
+                async with aiosqlite.connect(self.bot.db_location) as db:
+                    async with db.execute("SELECT data FROM embeds WHERE name = ? AND guild_id = ?",
+                                          (name, ctx.guild.id)) as cursor:
+                        data = await cursor.fetchone()
+                if data:
+                    modal = EditEmbedModal(embed=data[0], embed_name=name, db_location=self.bot.db_location)
+                    await ctx.respond(modal=modal, ephemeral=True)
+                    return True
+            await ctx.respond(f"Could not find embed with the name of {name}.", ephemeral=True)
+        else:
+            await ctx.respond("You do not have permission to manage embeds", ephemeral=True)
 
     @commands.Cog.listener()
     async def on_ready(self):

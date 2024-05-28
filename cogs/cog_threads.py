@@ -79,8 +79,10 @@ class Threads(commands.Cog):
         for thread in threads:
             t = self.bot.get_channel(thread[0])
             if not t:
-                await db.execute("DELETE FROM threads WHERE thread_id = ?", (thread[0],))
-                await db.commit()
+                self.logger.warning(f"Thread {thread[0]} not found, deleting from database.")
+                async with aiosqlite.connect(self.bot.db_location) as db:
+                    await db.execute("DELETE FROM threads WHERE thread_id = ?", (thread[0],))
+                    await db.commit()
                 continue
             else:
                 m = await t.fetch_message(thread[1])
@@ -124,6 +126,7 @@ class Threads(commands.Cog):
             async with aiosqlite.connect(self.bot.db_location) as db:
                 await db.execute("DELETE FROM threads WHERE thread_id = ?", (thread.id,))
                 await db.commit()
+            await self.update_notes()
 
     @forum.command(name="setup", description="Set up a channel as a forum channel to track")
     @option(name="channel", description="The channel to set up", required=True, channel=True)
