@@ -1,14 +1,12 @@
 import json as cjson
 import logging
 import re
-
 import discord
 from discord import option
 from discord.ext import commands
 import sqlite3
 import aiosqlite
 import utils
-
 from cogs.cog_threads import NoteModal
 
 

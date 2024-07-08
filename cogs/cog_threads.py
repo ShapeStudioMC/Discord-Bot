@@ -49,7 +49,7 @@ class DefaultNoteModal(NoteModal):
 
 
 async def button_edit_note_callback(interaction: discord.Interaction):
-    note = await util.get_note(interaction.channel)
+    note = await util.get_note(interaction.channel, replace_tags=False)
     modal = NoteModal(title=util.limit(f"Edit note for {interaction.channel.name}", 45),
                       note=note[0] if note else "No note found",
                       db_location=util.get_db_location())
@@ -152,7 +152,7 @@ class Threads(commands.Cog):
         except AttributeError:
             await ctx.respond("This command can only be used in a forum post!", ephemeral=True, delete_after=5)
             return
-        note = await util.get_note(ctx.channel)
+        note = await util.get_note(ctx.channel, replace_tags=False)
         # Check if the user is the owner of the thread or has permissions
         if ctx.author.id != ctx.channel.owner_id and not await util.has_permission(ctx.author.id,
                                                                                    "manage_threads",

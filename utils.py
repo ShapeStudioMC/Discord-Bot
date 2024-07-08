@@ -10,6 +10,8 @@ DEFAULT_SETTINGS = {
                                "thread. To edit this note please use the `/forum note` command. If you would like to"
                                "change what this message says by default please use the `/forum default_note` command."}
 }
+TAGS = ["<DATE_OPENED>", "<LAST_UPDATED>", "<THREAD_NAME>", "<THREAD_OWNER_MENTION>", "<THREAD_OWNER_USERNAME>"]
+CODE_BLOCK_CHAR = "`"
 
 dotenv.load_dotenv()
 
@@ -98,9 +100,10 @@ def time_since_epoch():
     return datetime.datetime.now().timestamp()
 
 
-async def get_note(thread: discord.Thread):
+async def get_note(thread: discord.Thread, replace_tags: bool = True):
     """
     Get the note for a thread
+    :param replace_tags: Replace tags in the note
     :param thread: The thread to get the note for
     :return: The note for the thread
     """
@@ -109,12 +112,16 @@ async def get_note(thread: discord.Thread):
                               (thread.id,)) as cursor:
             note = await cursor.fetchone()
     if note:
-        return note[0], note[1], note[2]
+        if replace_tags:
+            text = await render_text(note[0], thread)
+            return text, note[1], note[2]
+        else:
+            return note[0], note[1], note[2]
     else:
         return None
 
 
-def to_discord_timestamp(timestamp: int):
+def to_discord_timestamp(timestamp: int | float):
     """
     Convert a timestamp to a discord timestamp
     :param timestamp: The timestamp to convert
@@ -187,3 +194,37 @@ def limit(string: str, limit: int):
 
 def get_db_location():
     return os.getenv('DATABASE_LOCATION')
+
+
+async def render_text(text: str, thread: discord.Thread):
+    """
+    Render text with database variables, tags should only be replaced when they are outside of code blocks.
+    :param thread: The thread to render the text for
+    :param text: The text to render
+    :param database_connection: The database connection to use
+    :return: The rendered text
+    """
+    text_ar = list(text)
+    inside_code_block = False
+
+    ###################################
+    # If it ain't broke, don't fix it #
+    ###################################
+
+    for i, char in enumerate(text_ar):
+        if char == CODE_BLOCK_CHAR:
+            inside_code_block = not inside_code_block
+        if not inside_code_block:
+            if "".join(text_ar[i:i + len(TAGS[0])]) == TAGS[0]:
+                # Date opened should be when the thread was created
+                text_ar[i:i + len(TAGS[0])] = str(to_discord_timestamp(thread.created_at.timestamp()))
+            elif "".join(text_ar[i:i + len(TAGS[1])]) == TAGS[1]:
+                note = await get_note(thread, False)
+                text_ar[i:i + len(TAGS[1])] = str(to_discord_timestamp(note[1]))
+            elif "".join(text_ar[i:i + len(TAGS[2])]) == TAGS[2]:
+                text_ar[i:i + len(TAGS[2])] = thread.name
+            elif "".join(text_ar[i:i + len(TAGS[3])]) == TAGS[3]:
+                text_ar[i:i + len(TAGS[3])] = thread.owner.mention
+            elif "".join(text_ar[i:i + len(TAGS[4])]) == TAGS[4]:
+                text_ar[i:i + len(TAGS[4])] = thread.owner.display_name
+    return "".join(text_ar)
