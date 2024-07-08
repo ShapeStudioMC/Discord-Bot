@@ -7,7 +7,7 @@ import dotenv
 import os
 import logging
 from discord.ext import commands
-import sqlite3  # aiosqlite
+import sqlite3
 import utils
 
 if os.path.exists("debug.log"):
