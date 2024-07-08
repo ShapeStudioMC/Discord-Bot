@@ -24,7 +24,12 @@ class admin_cog(commands.Cog):
     @admin.command(name="info", description="Get information about the bot")
     async def info(self, ctx: discord.ApplicationContext):
         embed = discord.Embed(title="Bot Information", description="A bot for managing forum posts")
-        embed.add_field(name="Version", value=os.getenv("VERSION"))
+        update = utils.check_update(self.logger)
+        if update is not False:
+            embed.add_field(name="Version", value=f"{utils.get_version()}\n**Version `{update['remote']}` is "
+                                                  f"available!**")
+        else:
+            embed.add_field(name="Version", value=utils.get_version())
         embed.add_field(name="Author", value="BEMZlabs")
         embed.add_field(name="Source", value="[GitHub](https://github.com/ShapedBuildingServer/Discord-Bot)")
         await ctx.respond(embed=embed, ephemeral=True)

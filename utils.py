@@ -231,7 +231,7 @@ async def render_text(text: str, thread: discord.Thread):
     return "".join(text_ar)
 
 
-def check_update():
+def check_update(logger=None):
     """
     Check if the bot needs to update
     :return: True if the bot needs to update, False otherwise
@@ -239,16 +239,44 @@ def check_update():
     with open("main.py") as f:
         first_line = f.readline()
         local_version = int("".join(filter(str.isdigit, first_line)))
-    url = os.getenv('RAW_REPO_URL') + f"/main.py" if os.getenv('RAW_REPO_URL')[-1] != "/" else os.getenv('RAW_REPO_URL') + "main.py"
+    url = os.getenv('RAW_REPO_URL') + f"/main.py" if os.getenv('RAW_REPO_URL')[-1] != "/" else os.getenv(
+        'RAW_REPO_URL') + "main.py"
     response = requests.get(url)
     if response.status_code == 200:
+        if "import" in response.text.split("\n")[0]:
+            if logger:
+                logger.error("UTILS: Failed to check for updates: The first line of the remote file contains an import "
+                             "statement.")
+            else:
+                print(f"UTILS: Failed to check for updates: The first line of the remote file does not contain the "
+                      f"version number.")
+            return False
         try:
             remote_version = int("".join(filter(str.isdigit, response.text.split("\n")[0])))
         except ValueError:
-            print("UTILS: Failed to parse remote version! (ValueError)")
+            if logger:
+                logger.error("UTILS: Failed to parse remote version! (ValueError)")
+            else:
+                print("UTILS: Failed to parse remote version! (ValueError)")
             return False
         if remote_version > local_version:
             return {"remote": remote_version, "local": local_version}
+        if remote_version < local_version:
+            if logger:
+                logger.warning(f"UTILS: Local version is ahead of remote version: Local: {local_version}, "
+                               f"Remote: {remote_version}")
+            else:
+                print(f"UTILS: Local version is ahead of remote version: Local: {local_version}, Remote: "
+                      f"{remote_version}")
     else:
-        print(f"UTILS: Failed to check for updates: {response.status_code}")
+        if logger:
+            logger.error(f"UTILS: Failed to check for updates: {response.status_code}")
+        else:
+            print(f"UTILS: Failed to check for updates: {response.status_code}")
     return False
+
+
+def get_version():
+    with open("main.py") as f:
+        first_line = f.readline()
+        return int("".join(filter(str.isdigit, first_line)))

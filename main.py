@@ -1,16 +1,19 @@
 # VERSION: 0.0.1
+# THIS IS FOR UPDATE CHECKING, DO NOT REMOVE
+
+import time
 import discord
 import dotenv
 import os
 import logging
 from discord.ext import commands
 import sqlite3  # aiosqlite
-
 import utils
 
 if os.path.exists("debug.log"):
     print(
-        f"debug.log exists, size: {os.path.getsize('debug.log')} bytes > 1MiB? {os.path.getsize('debug.log') > 1048576}")
+        f"debug.log exists, size: {os.path.getsize('debug.log')} bytes > 1MiB? "
+        f"{os.path.getsize('debug.log') > 1048576}")
     if os.path.getsize("debug.log") > 1048576:
         open("debug.log", "w").close()
         print("Cleared debug.log")
@@ -83,9 +86,11 @@ async def shard(ctx: discord.ApplicationContext):
 
 if __name__ == "__main__":
     logging.info("Update Check")
-    update = utils.check_update()
+    update = utils.check_update(logging)
     if update is not False:
         logging.warning(f"Update available! Local version: {update['local']}, Remote version: {update['remote']}")
+        time.sleep(10)
+
     logging.info("Sanity check on the database")
     conn = sqlite3.connect(bot.db_location)
     c = conn.cursor()
