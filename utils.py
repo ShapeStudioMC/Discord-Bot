@@ -4,6 +4,7 @@ import aiosqlite as sqlite
 import discord
 import datetime
 import dotenv
+import requests
 
 DEFAULT_SETTINGS = {
     "defaultNote": {"default": "Hello! This space can be used to keep notes about the current project in this "
@@ -228,3 +229,26 @@ async def render_text(text: str, thread: discord.Thread):
             elif "".join(text_ar[i:i + len(TAGS[4])]) == TAGS[4]:
                 text_ar[i:i + len(TAGS[4])] = thread.owner.display_name
     return "".join(text_ar)
+
+
+def check_update():
+    """
+    Check if the bot needs to update
+    :return: True if the bot needs to update, False otherwise
+    """
+    with open("main.py") as f:
+        first_line = f.readline()
+        local_version = int("".join(filter(str.isdigit, first_line)))
+    url = os.getenv('RAW_REPO_URL') + f"/main.py" if os.getenv('RAW_REPO_URL')[-1] != "/" else os.getenv('RAW_REPO_URL') + "main.py"
+    response = requests.get(url)
+    if response.status_code == 200:
+        try:
+            remote_version = int("".join(filter(str.isdigit, response.text.split("\n")[0])))
+        except ValueError:
+            print("UTILS: Failed to parse remote version! (ValueError)")
+            return False
+        if remote_version > local_version:
+            return {"remote": remote_version, "local": local_version}
+    else:
+        print(f"UTILS: Failed to check for updates: {response.status_code}")
+    return False

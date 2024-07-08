@@ -1,9 +1,12 @@
+# VERSION: 0.0.1
 import discord
 import dotenv
 import os
 import logging
 from discord.ext import commands
 import sqlite3  # aiosqlite
+
+import utils
 
 if os.path.exists("debug.log"):
     print(
@@ -79,6 +82,10 @@ async def shard(ctx: discord.ApplicationContext):
 
 
 if __name__ == "__main__":
+    logging.info("Update Check")
+    update = utils.check_update()
+    if update is not False:
+        logging.warning(f"Update available! Local version: {update['local']}, Remote version: {update['remote']}")
     logging.info("Sanity check on the database")
     conn = sqlite3.connect(bot.db_location)
     c = conn.cursor()

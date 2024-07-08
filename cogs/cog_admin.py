@@ -1,4 +1,6 @@
 import logging
+import os
+
 import aiosqlite as sqlite
 import discord
 from discord import option
@@ -18,6 +20,14 @@ class admin_cog(commands.Cog):
     admin = discord.SlashCommandGroup(name="admin", description="Commands for managing the bot")
     forum = admin.create_subgroup(name="forum", description="Commands for managing forum posts")
     permissions = admin.create_subgroup(name="permissions", description="Commands for managing permissions")
+
+    @admin.command(name="info", description="Get information about the bot")
+    async def info(self, ctx: discord.ApplicationContext):
+        embed = discord.Embed(title="Bot Information", description="A bot for managing forum posts")
+        embed.add_field(name="Version", value=os.getenv("VERSION"))
+        embed.add_field(name="Author", value="BEMZlabs")
+        embed.add_field(name="Source", value="[GitHub](https://github.com/ShapedBuildingServer/Discord-Bot)")
+        await ctx.respond(embed=embed, ephemeral=True)
 
     @permissions.command(name="show", description="Show a users permissions.")
     async def show(self, ctx: discord.ApplicationContext, member: discord.Member):
