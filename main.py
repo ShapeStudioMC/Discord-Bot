@@ -56,7 +56,7 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 intents = discord.Intents.default().all()
 # bot = commands.AutoShardedBot(intents=intents, debug_guilds=[867773426773262346, 1242097337837289472,
 # 410980591476015104])
-bot = commands.AutoShardedBot(intents=intents, debug_guilds=[867773426773262346, 1242097337837289472])
+bot = commands.AutoShardedBot(intents=intents)
 bot.logger = logger
 bot.db_location = os.getenv('DATABASE_LOCATION')
 for filename in os.listdir('./cogs'):
