@@ -132,6 +132,10 @@ class Threads(commands.Cog):
     @option(name="channel", description="The channel to set up", required=True, channel=True)
     async def setup_forum(self, ctx: discord.ApplicationContext, channel: discord.ForumChannel):
         """insert the channel into the database"""
+        if not await util.has_permission(ctx.author.id, "manage_threads", self.bot.db_location) or \
+                not ctx.author.guild_permissions.manage_channels:
+            await ctx.respond("You do not have permission to manage threads", ephemeral=True)
+            return
         forum_channels = await util.get_forum_channels(ctx.guild)
         if channel.id in forum_channels:
             await ctx.respond("This channel is already set up as a forum channel", ephemeral=True)

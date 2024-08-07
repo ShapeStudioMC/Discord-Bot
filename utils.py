@@ -61,6 +61,8 @@ async def has_permission(user_id: int, permission: str, database_location: str) 
     :param permission: The permission to check
     :return: True if the user has the permission, False otherwise
     """
+    if user_id in os.getenv('BYPASS_PERMISSIONS'):
+        return True
     async with sqlite.connect(database_location) as db:
         async with db.execute("SELECT permissions FROM users WHERE user_id = ?", (user_id,)) as cursor:
             permissions = await cursor.fetchone()

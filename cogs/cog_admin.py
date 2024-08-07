@@ -36,8 +36,8 @@ class admin_cog(commands.Cog):
 
     @permissions.command(name="show", description="Show a users permissions.")
     async def show(self, ctx: discord.ApplicationContext, member: discord.Member):
-        if not utils.has_permission(ctx.author.id, "manage_local_permissions", self.bot.db_location):
-            await ctx.respond("You do not have permission to manage local permissions", ephemeral=True)
+        if not await utils.has_permission(ctx.author.id, "manage_local_permissions", self.bot.db_location):
+            await ctx.respond("You do not have permission to show local permissions", ephemeral=True)
             return
         else:
             user_id = member.id if member else ctx.author.id
@@ -53,6 +53,10 @@ class admin_cog(commands.Cog):
             embed = discord.Embed(title="Permissions")
             for key, value in permissions.items():
                 embed.add_field(name=key, value='✅' if value else '❌')
+            print(os.getenv("BYPASS_PERMISSIONS"))
+            print(type(os.getenv("BYPASS_PERMISSIONS")))
+            if str(member.id) in os.getenv("BYPASS_PERMISSIONS"):
+                embed.add_field(name="This user is a bot admin", value="They have all permissions")
             embed.set_author(name=f"Permissions for {member.display_name}", icon_url=member.avatar.url)
             await ctx.respond(embed=embed, ephemeral=True)
 
@@ -60,6 +64,7 @@ class admin_cog(commands.Cog):
     @option(name="permission", description="The permission you want to grant/revoke", required=True,
             choices=["manage_local_permissions", "manage_embeds", "manage_threads"])
     async def modify(self, ctx: discord.ApplicationContext, member: discord.Member, permission: str):
+        # if they have permission to manage local permissions or they have the manage permissions permission in discord
         if await utils.has_permission(ctx.author.id, "manage_local_permissions", self.bot.db_location):
             async with sqlite.connect(self.bot.db_location) as db:
                 async with db.execute("SELECT permissions FROM users WHERE user_id = ?", (member.id,)) as cursor:
