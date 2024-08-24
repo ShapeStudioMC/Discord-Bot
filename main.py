@@ -1,6 +1,27 @@
 # VERSION: 0.0.1
 # THIS IS FOR UPDATE CHECKING, DO NOT REMOVE
 
+"""
+Main module for the Discord bot.
+
+This file sets up logging, loads environment variables, initializes the bot,
+loads extensions (cogs), and defines some bot commands and events.
+
+Written by BEMZlabs for ShapeStudio (@ShapeStudioMC)
+
+Copyright 2024 BEMZlabs for ShapeStudio
+
+This program is free software; you can redistribute it and/or modify it under the terms of the GNU General Public 
+Licence as published by the Free Software Foundation; either version 2 of the Licence, or (at your option) any later 
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied 
+warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public Licence for more details.
+
+You should have received a copy of the GNU General Public Licence along with this program; if not, see 
+<https://www.gnu.org/licenses/>.
+"""
+
 import time
 import discord
 import dotenv
@@ -10,6 +31,7 @@ from discord.ext import commands
 import sqlite3
 import utils
 
+# Check if debug.log exists and clear it if it exceeds 1MiB
 if os.path.exists("debug.log"):
     print(
         f"debug.log exists, size: {os.path.getsize('debug.log')} bytes > 1MiB? "
@@ -23,20 +45,20 @@ discord_logger = logging.getLogger('discord')
 discord_logger.setLevel(logging.DEBUG)  # or INFO
 discord_logger.propagate = False
 
-# Your existing logger setup
+# Set up the main logger
 logger = logging.getLogger('main')
 logger.setLevel(logging.DEBUG)  # Set logger level
 logger.propagate = False
 
-# Create a FileHandler
+# Create a FileHandler for logging to a file
 file_handler = logging.FileHandler('debug.log')
 file_handler.setLevel(logging.DEBUG)  # Set handler level
 
-# Create a StreamHandler for STDOUT
+# Create a StreamHandler for logging to STDOUT
 stream_handler = logging.StreamHandler()
 stream_handler.setLevel(logging.INFO)  # Set handler level
 
-# Create a Formatter
+# Create a Formatter for log messages
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 # Set the Formatter for the handlers
@@ -47,18 +69,21 @@ stream_handler.setFormatter(formatter)
 logger.addHandler(file_handler)
 logger.addHandler(stream_handler)
 
+# Add the handlers to the discord logger
 discord_logger.addHandler(file_handler)
 discord_logger.addHandler(stream_handler)
 
+# Load environment variables from .env file
 dotenv.load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 
+# Set up bot intents
 intents = discord.Intents.default().all()
-# bot = commands.AutoShardedBot(intents=intents, debug_guilds=[867773426773262346, 1242097337837289472,
-# 410980591476015104])
 bot = commands.AutoShardedBot(intents=intents)
 bot.logger = logger
 bot.db_location = os.getenv('DATABASE_LOCATION')
+
+# Load all cogs (extensions) from the cogs directory
 for filename in os.listdir('./cogs'):
     if filename.endswith('.py') and filename.startswith('cog_'):
         bot.load_extension(f'cogs.{filename[:-3]}')
@@ -72,6 +97,15 @@ async def on_ready():
 
 @bot.slash_command(name="shard", description="Get the shard ID and info for the current guild")
 async def shard(ctx: discord.ApplicationContext):
+    """
+    Slash command to get shard information for the current guild.
+
+    Args:
+        ctx (discord.ApplicationContext): The context of the command.
+
+    Returns:
+        None
+    """
     shard: discord.ShardInfo = bot.get_shard(ctx.guild.shard_id)
     shard_count: int = shard.shard_count
     shard_ping: float = round(shard.latency * 1000, 1)

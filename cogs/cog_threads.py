@@ -8,13 +8,32 @@ import aiosqlite
 
 
 class NoteModal(discord.ui.Modal):
+    """
+    A modal dialog for editing a note.
+
+    Attributes:
+        db_location (str): The location of the database.
+    """
     def __init__(self, note, db_location, *args, **kwargs) -> None:
+        """
+        Initialize the NoteModal.
+
+        Args:
+            note (str): The initial note content.
+            db_location (str): The location of the database.
+        """
         super().__init__(*args, **kwargs)
         self.db_location = db_location
         self.add_item(discord.ui.InputText(label="Edit Note", style=discord.InputTextStyle.paragraph, value=note,
                                            placeholder="Enter your note here (Markdown supported)."))
 
     async def callback(self, interaction: discord.Interaction):
+        """
+        Handle the submission of the modal.
+
+        Args:
+            interaction (discord.Interaction): The interaction that triggered the modal.
+        """
         await interaction.response.defer()
         new_note = interaction.data["components"][0]["components"][0]["value"]
         async with aiosqlite.connect(self.db_location) as db:
@@ -30,11 +49,31 @@ class NoteModal(discord.ui.Modal):
 
 
 class DefaultNoteModal(NoteModal):
+    """
+    A modal dialog for editing the default note of a channel.
+
+    Attributes:
+        channel_id (int): The ID of the channel.
+    """
     def __init__(self, note, db_location, channel_id, *args, **kwargs) -> None:
+        """
+        Initialize the DefaultNoteModal.
+
+        Args:
+            note (str): The initial note content.
+            db_location (str): The location of the database.
+            channel_id (int): The ID of the channel.
+        """
         super().__init__(note=note, db_location=db_location, *args, **kwargs)
         self.channel_id = channel_id
 
     async def callback(self, interaction: discord.Interaction):
+        """
+        Handle the submission of the modal.
+
+        Args:
+            interaction (discord.Interaction): The interaction that triggered the modal.
+        """
         await interaction.response.defer()
         new_note = interaction.data["components"][0]["components"][0]["value"]
         settings = await util.get_settings(interaction.guild)
@@ -49,6 +88,12 @@ class DefaultNoteModal(NoteModal):
 
 
 async def button_edit_note_callback(interaction: discord.Interaction):
+    """
+    Callback function for the "Edit Note" button.
+
+    Args:
+        interaction (discord.Interaction): The interaction that triggered the button.
+    """
     note = await util.get_note(interaction.channel, replace_tags=False)
     modal = NoteModal(title=util.limit(f"Edit note for {interaction.channel.name}", 45),
                       note=note[0] if note else "No note found",
@@ -57,7 +102,21 @@ async def button_edit_note_callback(interaction: discord.Interaction):
 
 
 class Threads(commands.Cog):
+    """
+    A cog for managing forum threads and notes.
+
+    Attributes:
+        bot (commands.Bot): The bot instance.
+        logger (logging.Logger): The logger instance.
+    """
     def __init__(self, bot, logger):
+        """
+        Initialize the Threads cog.
+
+        Args:
+            bot (commands.Bot): The bot instance.
+            logger (logging.Logger): The logger instance.
+        """
         self.bot = bot
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.handlers = logger.handlers
@@ -68,6 +127,9 @@ class Threads(commands.Cog):
 
     @tasks.loop(minutes=5)
     async def update_notes(self):
+        """
+        Periodically update the notes for all threads.
+        """
         await self.bot.wait_until_ready()
         async with aiosqlite.connect(self.bot.db_location) as db:
             async with db.execute("SELECT thread_id, note_id FROM threads") as cursor:
@@ -103,6 +165,12 @@ class Threads(commands.Cog):
 
     @commands.Cog.listener()
     async def on_thread_create(self, thread):
+        """
+        Event listener for when a new thread is created.
+
+        Args:
+            thread (discord.Thread): The created thread.
+        """
         if thread.parent.id in await util.get_forum_channels(thread.guild):
             self.logger.info(f"New thread in forum: {thread.parent.name}, {thread.name}")
             m = await thread.send("Welcome to the thread! This message will be updated when I receive information from "
@@ -121,6 +189,12 @@ class Threads(commands.Cog):
 
     @commands.Cog.listener()
     async def on_thread_delete(self, thread):
+        """
+        Event listener for when a thread is deleted.
+
+        Args:
+            thread (discord.Thread): The deleted thread.
+        """
         if thread.parent.id in await util.get_forum_channels(thread.guild):
             self.logger.warning(f"Thread deleted: {thread.name}")
             async with aiosqlite.connect(self.bot.db_location) as db:
@@ -131,7 +205,13 @@ class Threads(commands.Cog):
     @forum.command(name="setup", description="Set up a channel as a forum channel to track")
     @option(name="channel", description="The channel to set up", required=True, channel=True)
     async def setup_forum(self, ctx: discord.ApplicationContext, channel: discord.ForumChannel):
-        """insert the channel into the database"""
+        """
+        Set up a channel as a forum channel to track.
+
+        Args:
+            ctx (discord.ApplicationContext): The context of the command.
+            channel (discord.ForumChannel): The channel to set up.
+        """
         if not await util.has_permission(ctx.author.id, "manage_threads", self.bot.db_location) or \
                 not ctx.author.guild_permissions.manage_channels:
             await ctx.respond("You do not have permission to manage threads", ephemeral=True)
@@ -149,6 +229,12 @@ class Threads(commands.Cog):
 
     @forum.command(name="note", description="Modify the note for a forum thread")
     async def note(self, ctx: discord.ApplicationContext):
+        """
+        Modify the note for a forum thread.
+
+        Args:
+            ctx (discord.ApplicationContext): The context of the command.
+        """
         try:
             if ctx.channel.parent.id not in await util.get_forum_channels(ctx.guild):
                 await ctx.respond("This command can only be used in a forum post!", ephemeral=True, delete_after=5)
@@ -169,6 +255,13 @@ class Threads(commands.Cog):
 
     @forum.command(name="default_note", description="Change the default note for a forum channel")
     async def default_note(self, ctx: discord.ApplicationContext, channel: discord.ForumChannel):
+        """
+        Change the default note for a forum channel.
+
+        Args:
+            ctx (discord.ApplicationContext): The context of the command.
+            channel (discord.ForumChannel): The channel to change the default note for.
+        """
         settings = await util.get_settings(ctx.guild)
         try:
             defaultNote = settings["defaultNote"][channel.id]
@@ -180,10 +273,44 @@ class Threads(commands.Cog):
 
     @forum.command(name="update", description="Update the note for all forum threads")
     async def update(self, ctx: discord.ApplicationContext):
+        """
+        Update the note for all forum threads.
+
+        Args:
+            ctx (discord.ApplicationContext): The context of the command.
+        """
         await ctx.defer()
         await self.update_notes()
         await ctx.respond("Notes updated!", ephemeral=True, delete_after=5)
 
+    @forum.command(name="close", description="Close a forum thread")
+    async def close(self, ctx: discord.ApplicationContext):
+        """
+        Close a forum thread.
+
+        Args:
+            ctx (discord.ApplicationContext): The context of the command.
+        """
+        if ctx.channel.parent.id not in await util.get_forum_channels(ctx.guild):
+            await ctx.respond("This command can only be used in a forum post!", ephemeral=True, delete_after=5)
+            return
+        if ctx.author.id != ctx.channel.owner_id and (not await util.has_permission(ctx.author.id,
+                                                                                   "manage_threads",
+                                                                                   self.bot.db_location) or
+                                                      not ctx.author.guild_permissions.manage_channels):
+            await ctx.respond("You do not have permission to close this thread!", ephemeral=True, delete_after=5)
+            return
+        await ctx.respond("Thread closed!", ephemeral=True, delete_after=5)
+        await ctx.channel.edit(archived=True, locked=True,
+                               name=f"🔒 {ctx.channel.name} (Closed)",
+                               reason=f"Closed by {ctx.author.name}")
+
 
 def setup(bot):
+    """
+    Set up the Threads cog.
+
+    Args:
+        bot (commands.Bot): The bot instance.
+    """
     bot.add_cog(Threads(bot, bot.logger))

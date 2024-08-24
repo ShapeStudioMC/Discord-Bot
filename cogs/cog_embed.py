@@ -11,7 +11,25 @@ from cogs.cog_threads import NoteModal
 
 
 class EditEmbedModal(NoteModal):
+    """
+    A modal for editing an embed.
+
+    Attributes:
+        embed (str): The embed data.
+        embed_name (str): The name of the embed.
+        db_location (str): The location of the database.
+    """
     def __init__(self, embed, embed_name, db_location, *args, **kwargs) -> None:
+        """
+        Initialize the EditEmbedModal.
+
+        Args:
+            embed (str): The embed data.
+            embed_name (str): The name of the embed.
+            db_location (str): The location of the database.
+            *args: Variable length argument list.
+            **kwargs: Arbitrary keyword arguments.
+        """
         super().__init__(note=embed, db_location=db_location, *args, **kwargs)
         self.embed_name = embed_name
 
@@ -27,7 +45,21 @@ class EditEmbedModal(NoteModal):
 
 
 class embed_cog(commands.Cog):
+    """
+    A cog for managing embeds.
+
+    Attributes:
+        bot (commands.Bot): The bot instance.
+        logger (logging.Logger): The logger instance.
+    """
     def __init__(self, bot, logger):
+        """
+        Initialize the embed_cog.
+
+        Args:
+            bot (commands.Bot): The bot instance.
+            logger (logging.Logger): The logger instance.
+        """
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.handlers = logger.handlers
         self.logger.setLevel(logger.level)
@@ -42,7 +74,21 @@ class embed_cog(commands.Cog):
     @option(name="json", description="The JSON for the embed", required=True)
     @option(name="name", description="The name of the embed", required=True)
     async def create(self, ctx: discord.ApplicationContext, json: str, name: str):
+        """
+        Create a new embed.
+
+        Args:
+            ctx (discord.ApplicationContext): The application context.
+            json (str): The JSON data for the embed.
+            name (str): The name of the embed.
+        """
         async def process_yes_callback(interaction: discord.Interaction):
+            """
+            Handle the callback when the "Yes" button is pressed.
+
+            Args:
+                interaction (discord.Interaction): The interaction object.
+            """
             if interaction.user.id == ctx.author.id and await utils.has_permission(ctx.author.id, "manage_embeds",
                                                                                    self.bot.db_location):
                 await interaction.response.defer()
@@ -59,6 +105,12 @@ class embed_cog(commands.Cog):
                 return True
 
         async def process_no_callback(interaction: discord.Interaction):
+            """
+            Handle the callback when the "No" button is pressed.
+
+            Args:
+                interaction (discord.Interaction): The interaction object.
+            """
             if interaction.user.id == ctx.author.id:
                 await interaction.message.delete()
                 await ctx.respond("Embed not saved", ephemeral=True, delete_after=5)
@@ -96,6 +148,15 @@ class embed_cog(commands.Cog):
             await ctx.respond("You do not have permission to manage embeds", ephemeral=True)
 
     def build_embed_choices(self, guild_id: int):
+        """
+        Build a list of embed choices for a given guild.
+
+        Args:
+            guild_id (int): The ID of the guild.
+
+        Returns:
+            list: A list of embed names.
+        """
         with sqlite3.connect(self.bot.db_location) as db:
             cursor = db.cursor()
             cursor.execute("SELECT name FROM embeds WHERE guild_id = ?", (guild_id,))
@@ -109,7 +170,20 @@ class embed_cog(commands.Cog):
     @embed.command(name="show", description="Show an embed")
     @option(name="name", description="The name of the embed", required=True)
     async def show(self, ctx: discord.ApplicationContext, name: str = None):
+        """
+        Show an embed.
+
+        Args:
+            ctx (discord.ApplicationContext): The application context.
+            name (str, optional): The name of the embed. Defaults to None.
+        """
         async def show_callback(interaction: discord.Interaction):
+            """
+            Handle the callback when an embed is selected to be shown.
+
+            Args:
+                interaction (discord.Interaction): The interaction object.
+            """
             await interaction.response.defer()
             if interaction.user.id == ctx.author.id:
                 name = interaction.data["values"][0]
@@ -156,7 +230,20 @@ class embed_cog(commands.Cog):
     @embed.command(name="delete", description="Delete an embed")
     @option(name="name", description="The name of the embed", required=False)
     async def delete(self, ctx: discord.ApplicationContext, name: str = None):
+        """
+        Delete an embed.
+
+        Args:
+            ctx (discord.ApplicationContext): The application context.
+            name (str, optional): The name of the embed. Defaults to None.
+        """
         async def delete_callback(interaction: discord.Interaction):
+            """
+            Handle the callback when an embed is selected to be deleted.
+
+            Args:
+                interaction (discord.Interaction): The interaction object.
+            """
             await interaction.response.defer()
             if interaction.user.id == ctx.author.id:
                 name = interaction.data["values"][0]
@@ -199,7 +286,19 @@ class embed_cog(commands.Cog):
     @embed.command(name="edit", description="Edit an embed")
     @option(name="name", description="The name of the embed", required=False)
     async def edit(self, ctx: discord.ApplicationContext, name: str):
+        """
+        Edit an embed.
+
+        Args:
+            ctx (discord.ApplicationContext): The application context.
+            name (str): The name of the embed.
+        """
         async def edit_callback(interaction: discord.Interaction):
+            """
+            Handle the callback when an embed is selected to be edited.
+            Args:
+                interaction (discord.Interaction): The interaction object.
+            """
             # await interaction.response.defer()
             if interaction.user.id == ctx.author.id:
                 name = interaction.data["values"][0]
@@ -247,4 +346,9 @@ class embed_cog(commands.Cog):
 
 
 def setup(bot):
+    """
+    Set up the embed_cog. bot.logger should have been set previously in main.py.
+    Args:
+        bot (commands.Bot): The bot instance.
+        """
     bot.add_cog(embed_cog(bot, bot.logger))

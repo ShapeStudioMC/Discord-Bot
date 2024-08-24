@@ -6,14 +6,18 @@ import datetime
 import dotenv
 import requests
 
+# Default settings for the bot
 DEFAULT_SETTINGS = {
     "defaultNote": {"default": "Hello! This space can be used to keep notes about the current project in this "
                                "thread. To edit this note please use the `/forum note` command. If you would like to"
                                "change what this message says by default please use the `/forum default_note` command."}
 }
+
+# Tags used in the notes
 TAGS = ["<DATE_OPENED>", "<LAST_UPDATED>", "<THREAD_NAME>", "<THREAD_OWNER_MENTION>", "<THREAD_OWNER_USERNAME>"]
 CODE_BLOCK_CHAR = "`"
 
+# Load environment variables from .env
 dotenv.load_dotenv()
 
 
@@ -21,6 +25,7 @@ def convert_permission(permissions: str | dict) -> dict | str:
     """
     Convert a string of permissions to a dictionary of permissions with the key being the permission name and the value
     being the permission value.
+
     :param permissions: Either a string or dictionary of permissions
     :return: The opposite type of permissions is returned.
     """
@@ -56,6 +61,7 @@ def convert_permission(permissions: str | dict) -> dict | str:
 async def has_permission(user_id: int, permission: str, database_location: str) -> bool:
     """
     Check if a user has a specific permission
+
     :param database_location: The location of the database
     :param user_id: The user ID to check
     :param permission: The permission to check
@@ -73,6 +79,7 @@ async def has_permission(user_id: int, permission: str, database_location: str) 
 async def get_forum_channels(guild: discord.Guild):
     """
     Get all the forum channels in a guild
+
     :param guild: The guild to check
     :return: A list of forum channels' ids
     """
@@ -98,6 +105,7 @@ async def get_forum_channels(guild: discord.Guild):
 def time_since_epoch():
     """
     Get the time since epoch
+
     :return: The time since epoch
     """
     return datetime.datetime.now().timestamp()
@@ -106,6 +114,7 @@ def time_since_epoch():
 async def get_note(thread: discord.Thread, replace_tags: bool = True):
     """
     Get the note for a thread
+
     :param replace_tags: Replace tags in the note
     :param thread: The thread to get the note for
     :return: The note for the thread
@@ -127,6 +136,7 @@ async def get_note(thread: discord.Thread, replace_tags: bool = True):
 def to_discord_timestamp(timestamp: int | float):
     """
     Convert a timestamp to a discord timestamp
+
     :param timestamp: The timestamp to convert
     :return: The discord timestamp
     """
@@ -136,6 +146,7 @@ def to_discord_timestamp(timestamp: int | float):
 async def build_forum_embed(thread: discord.Thread = None, note: str = None):
     """
     Build an embed for a forum post
+
     :param note: The note to use for the embed
     :param thread: The thread to build the embed for if note is None
     :return: The embed
@@ -159,6 +170,7 @@ async def build_forum_embed(thread: discord.Thread = None, note: str = None):
 def is_forum_post(ctx, thread: discord.Thread):
     """
     Check if a thread is a forum post
+
     :param ctx: The context of the command
     :param thread: The thread to check
     :return: True if the thread is a forum post, False otherwise
@@ -170,6 +182,7 @@ def is_forum_post(ctx, thread: discord.Thread):
 async def get_settings(guild: discord.Guild):
     """
     Get the settings for a guild
+
     :param guild: The guild to get the settings for
     :return: The settings for the guild
     """
@@ -186,6 +199,7 @@ async def get_settings(guild: discord.Guild):
 def limit(string: str, limit: int):
     """
     Limit the length of a string
+
     :param string: The string to limit
     :param limit: The limit of the string
     :return: The limited string
@@ -196,15 +210,20 @@ def limit(string: str, limit: int):
 
 
 def get_db_location():
+    """
+    Get the database location from environment variables
+
+    :return: The database location
+    """
     return os.getenv('DATABASE_LOCATION')
 
 
 async def render_text(text: str, thread: discord.Thread):
     """
     Render text with database variables, tags should only be replaced when they are outside of code blocks.
+
     :param thread: The thread to render the text for
     :param text: The text to render
-    :param database_connection: The database connection to use
     :return: The rendered text
     """
     text_ar = list(text)
@@ -236,6 +255,8 @@ async def render_text(text: str, thread: discord.Thread):
 def check_update(logger=None):
     """
     Check if the bot needs to update
+
+    :param logger: Optional logger to log messages
     :return: True if the bot needs to update, False otherwise
     """
     with open("main.py") as f:
@@ -279,6 +300,11 @@ def check_update(logger=None):
 
 
 def get_version():
+    """
+    Get the version of the bot from the first line of main.py
+
+    :return: The version of the bot
+    """
     with open("main.py") as f:
         first_line = f.readline()
         return int("".join(filter(str.isdigit, first_line)))
