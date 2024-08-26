@@ -3,6 +3,8 @@ import logging
 import discord
 from discord import option
 from discord.ext import commands, tasks
+
+import utils
 import utils as util
 import aiosqlite
 
@@ -14,6 +16,7 @@ class NoteModal(discord.ui.Modal):
     Attributes:
         db_location (str): The location of the database.
     """
+
     def __init__(self, note, db_location, *args, **kwargs) -> None:
         """
         Initialize the NoteModal.
@@ -55,6 +58,7 @@ class DefaultNoteModal(NoteModal):
     Attributes:
         channel_id (int): The ID of the channel.
     """
+
     def __init__(self, note, db_location, channel_id, *args, **kwargs) -> None:
         """
         Initialize the DefaultNoteModal.
@@ -87,6 +91,13 @@ class DefaultNoteModal(NoteModal):
         return True
 
 
+class JumpButton(discord.ui.View):
+    def __init__(self, JumpURL):
+        super().__init__()
+        button = discord.ui.Button(label="Jump to Note", style=discord.ButtonStyle.url, url=JumpURL)
+        self.add_item(button)
+
+
 async def button_edit_note_callback(interaction: discord.Interaction):
     """
     Callback function for the "Edit Note" button.
@@ -109,6 +120,7 @@ class Threads(commands.Cog):
         bot (commands.Bot): The bot instance.
         logger (logging.Logger): The logger instance.
     """
+
     def __init__(self, bot, logger):
         """
         Initialize the Threads cog.
@@ -201,6 +213,34 @@ class Threads(commands.Cog):
                 await db.execute("DELETE FROM threads WHERE thread_id = ?", (thread.id,))
                 await db.commit()
             await self.update_notes()
+
+    @commands.Cog.listener()
+    async def on_message(self, message):
+        """
+        Event listener for when a message is sent.
+
+        Args:
+            message (discord.Message): The message that was sent.
+        """
+        if message.channel.parent.id in await util.get_forum_channels(message.guild):
+            note = await util.get_note_message(message.channel)
+            deleted = False
+            c = 0
+            messages = 0
+            found_bot = False
+            for m in await message.channel.history(limit=20).flatten():
+                if m.author.id == self.bot.user.id:
+                    found_bot = True
+                    if c == 0:
+                        break
+                    if m.id != note.id:
+                        await m.delete()
+                    deleted = True
+                else:
+                    messages += 1
+                c += 1
+            if (deleted or not found_bot) and messages > 10:
+                await message.channel.send("Jump to note", view=JumpButton(note.jump_url))
 
     @forum.command(name="setup", description="Set up a channel as a forum channel to track")
     @option(name="channel", description="The channel to set up", required=True, channel=True)
@@ -295,8 +335,8 @@ class Threads(commands.Cog):
             await ctx.respond("This command can only be used in a forum post!", ephemeral=True, delete_after=5)
             return
         if ctx.author.id != ctx.channel.owner_id and (not await util.has_permission(ctx.author.id,
-                                                                                   "manage_threads",
-                                                                                   self.bot.db_location) or
+                                                                                    "manage_threads",
+                                                                                    self.bot.db_location) or
                                                       not ctx.author.guild_permissions.manage_channels):
             await ctx.respond("You do not have permission to close this thread!", ephemeral=True, delete_after=5)
             return

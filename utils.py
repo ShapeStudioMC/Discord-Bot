@@ -308,3 +308,23 @@ def get_version():
     with open("main.py") as f:
         first_line = f.readline()
         return int("".join(filter(str.isdigit, first_line)))
+
+
+async def get_note_message(thread: discord.Thread):
+    """
+    Get the note message for a thread, returning the message
+
+    :param ctx: The context of the command
+    :param thread: The thread to get the note message for
+    :return: discord.Message
+    """
+    # call the database to find the note message ID
+    async with sqlite.connect(os.getenv('DATABASE_LOCATION')) as db:
+        async with db.execute("SELECT note_id FROM threads WHERE thread_id = ?", (thread.id,)) as cursor:
+            note_message_id = await cursor.fetchone()
+    if note_message_id:
+        note_message_id = note_message_id[0]
+        note_message = await thread.fetch_message(note_message_id)
+        return note_message
+    else:
+        return None
