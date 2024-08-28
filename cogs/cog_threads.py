@@ -222,6 +222,11 @@ class Threads(commands.Cog):
         Args:
             message (discord.Message): The message that was sent.
         """
+        try:
+            message.channel.parent.id # Are we inside a thread?
+        except AttributeError:
+            return
+
         if message.channel.parent.id in await util.get_forum_channels(message.guild):
             note = await util.get_note_message(message.channel)
             deleted = False

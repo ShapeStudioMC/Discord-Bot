@@ -1,4 +1,4 @@
-# VERSION: 0.0.2
+# VERSION: 0.0.3
 # THIS IS FOR UPDATE CHECKING, DO NOT REMOVE
 
 """
@@ -129,7 +129,7 @@ if __name__ == "__main__":
     conn = sqlite3.connect(bot.db_location)
     c = conn.cursor()
     c.execute("CREATE TABLE IF NOT EXISTS embeds (embed_id INTEGER PRIMARY KEY NOT NULL,"
-              "data TEXT NOT NULL, guild_id INT NOT NULL, name TEXT NOT NULL);")
+              "data TEXT NOT NULL, guild_id INT NOT NULL, name TEXT NOT NULL UNIQUE);")
     c.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY NOT NULL,"
               "permissions TEXT);")
     c.execute("CREATE TABLE IF NOT EXISTS guilds (guild_id INTEGER PRIMARY KEY NOT NULL,"

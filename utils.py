@@ -1,5 +1,7 @@
 import json
 import os
+import re
+
 import aiosqlite as sqlite
 import discord
 import datetime
@@ -16,6 +18,9 @@ DEFAULT_SETTINGS = {
 # Tags used in the notes
 TAGS = ["<DATE_OPENED>", "<LAST_UPDATED>", "<THREAD_NAME>", "<THREAD_OWNER_MENTION>", "<THREAD_OWNER_USERNAME>"]
 CODE_BLOCK_CHAR = "`"
+
+HEX_REGEX = r"^(?:[0-9a-fA-F]{3}){1,2}$"
+
 
 # Load environment variables from .env
 dotenv.load_dotenv()
@@ -328,3 +333,31 @@ async def get_note_message(thread: discord.Thread):
         return note_message
     else:
         return None
+
+
+async def convert_embed_to_JSON(embed: discord.Embed):
+    """
+    Convert an embed to JSON
+
+    :param embed: The embed to convert
+    :return str: The JSON representation of the embed
+    """
+    return str(json.dumps(embed.to_dict()))
+
+
+def is_color(color: str | discord.Color):
+    """
+    Check if a color is a valid discord.Color
+
+    :param color: The color to check
+    :return: True if the color is valid, False otherwise
+    """
+    if isinstance(color, discord.Color):
+        return color
+    try:
+        return discord.Color(value=int(color, 16))
+    except ValueError | TypeError:
+        pass
+    if re.match(HEX_REGEX, color):
+        return discord.Color(value=int(color, 16))
+    return False
