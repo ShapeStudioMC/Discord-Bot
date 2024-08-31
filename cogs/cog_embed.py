@@ -35,7 +35,7 @@ class EditEmbedModal(NoteModal):
             *args: Variable length argument list.
             **kwargs: Arbitrary keyword arguments.
         """
-        super().__init__(note=embed, db_location=db_location, *args, **kwargs)
+        super().__init__(title=embed_name, note=embed, db_location=db_location, *args, **kwargs)
         self.embed_name = embed_name
 
     async def callback(self, interaction: discord.Interaction):
@@ -308,7 +308,7 @@ class embed_cog(commands.Cog):
                 await ctx.respond(f"Embed with a name of {name} was not found", ephemeral=True)
 
     @embed.command(name="delete", description="Delete an embed")
-    @option(name="name", description="The name of the embed", required=False)
+    @option(name="name", description="The name of the embed", required=False, autocomplete=build_embed_choices)
     async def delete(self, ctx: discord.ApplicationContext, name: str = None):
         """
         Delete an embed.
@@ -364,7 +364,7 @@ class embed_cog(commands.Cog):
             await ctx.respond(f"Could not find embed with the name of {name}.", ephemeral=True)
 
     @embed.command(name="edit", description="Edit an embed")
-    @option(name="name", description="The name of the embed", required=False)
+    @option(name="name", description="The name of the embed", required=True, autocomplete=build_embed_choices)
     async def edit(self, ctx: discord.ApplicationContext, name: str):
         """
         Edit an embed.
@@ -413,8 +413,39 @@ class embed_cog(commands.Cog):
                                           (name, ctx.guild.id)) as cursor:
                         data = await cursor.fetchone()
                 if data:
-                    modal = EditEmbedModal(embed=data[0], embed_name=name, db_location=self.bot.db_location)
-                    await ctx.respond(modal=modal, ephemeral=True)
+                    await ctx.send_modal(EditEmbedModal(embed=data[0], embed_name=name, db_location=self.bot.db_location))
+                    return True
+            await ctx.respond(f"Could not find embed with the name of {name}.", ephemeral=True)
+        else:
+            await ctx.respond("You do not have permission to manage embeds", ephemeral=True)
+
+    @embed.command(name="rename", description="Rename an embed")
+    @option(name="name", description="The name of the embed", required=True, autocomplete=build_embed_choices)
+    @option(name="new_name", description="The new name of the embed", required=True)
+    async def rename(self, ctx: discord.ApplicationContext, name: str, new_name: str):
+        """
+        Rename an embed.
+
+        Args:
+            ctx (discord.ApplicationContext): The application context.
+            name (str): The name of the embed.
+            new_name (str): The new name of the embed.
+        """
+        if await utils.has_permission(ctx.author.id, "manage_embeds", self.bot.db_location):
+            if name is None or name == "":
+                await ctx.respond("No embed provided!", ephemeral=True)
+                return
+            elif (name != "" and name is not None) and not re.match(self.name_regex, name):
+                async with aiosqlite.connect(self.bot.db_location) as db:
+                    async with db.execute("SELECT data FROM embeds WHERE name = ? AND guild_id = ?",
+                                          (name, ctx.guild.id)) as cursor:
+                        data = await cursor.fetchone()
+                if data:
+                    async with aiosqlite.connect(self.bot.db_location) as db:
+                        await db.execute("UPDATE embeds SET name = ? WHERE name = ? AND guild_id = ?",
+                                         (new_name, name, ctx.guild.id))
+                        await db.commit()
+                    await ctx.respond(f"Embed with the name of {name} has been renamed to {new_name}.", ephemeral=True)
                     return True
             await ctx.respond(f"Could not find embed with the name of {name}.", ephemeral=True)
         else:
