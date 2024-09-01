@@ -1,5 +1,6 @@
 import json
 import logging
+from copy import copy
 import discord
 from discord import option
 from discord.ext import commands, tasks
@@ -87,7 +88,8 @@ class DefaultNoteModal(NoteModal):
                              (json.dumps(settings), interaction.guild.id))
             await db.commit()
         em = await util.build_forum_embed(note=new_note)
-        await interaction.followup.send("✔ `Default note has been modified!`", ephemeral=True, delete_after=15, embed=em)
+        await interaction.followup.send("✔ `Default note has been modified!`", ephemeral=True, delete_after=15,
+                                        embed=em)
         return True
 
 
@@ -100,7 +102,6 @@ class EditNoteButtonView(discord.ui.View):
     @discord.ui.button(label="Edit Note", style=discord.ButtonStyle.primary, custom_id="button_edit_note")
     async def button_edit_note(self, button: discord.ui.Button, interaction: discord.Interaction):
         self.permitted_users = await util.get_all_allowed_users(interaction.channel)
-        print(self.permitted_users)
         if interaction.user.id not in self.permitted_users:
             await interaction.respond("❌ `You do not have permission to edit this note!`", ephemeral=True)
             return
@@ -109,6 +110,39 @@ class EditNoteButtonView(discord.ui.View):
                           note=note[0] if note else "No note found",
                           db_location=util.get_db_location())
         await interaction.response.send_modal(modal)
+
+class UserSelectAssignView(discord.ui.View):
+    def __init__(self, users, db_location):
+        super().__init__()
+        self.users = users
+        self.db_location = db_location
+        select = discord.ui.Select(placeholder="Select a user to assign", options=self.build_assign_choices())
+        select.callback = self.select_assign_user
+        self.add_item(select)
+
+
+    def build_assign_choices(self):
+        choices = []
+        for user in self.users:
+            choices.append(discord.SelectOption(label=user.name, value=str(user.id)))
+        return choices
+
+
+    async def select_assign_user(self, interaction: discord.Interaction):
+        await interaction.message.delete()
+        selected_user = interaction.data["values"][0]
+        user = interaction.guild.get_member(int(selected_user))
+        assigned = await utils.get_thread_assigned_users(interaction.channel)
+        if user.id in assigned:
+            await interaction.respond("❌ `User is already assigned to this thread`", ephemeral=True)
+            return
+        assigned.append(user.id)
+        async with aiosqlite.connect(self.db_location) as db:
+            await db.execute("UPDATE threads SET assigned_discord_ids = ? WHERE thread_id = ?",
+                             (json.dumps(assigned), interaction.channel.id))
+            await db.commit()
+        await interaction.respond(f"✔ `User {user.name} has been assigned to this thread`", ephemeral=True)
+
 
 class JumpButton(discord.ui.View):
     def __init__(self, JumpURL):
@@ -131,6 +165,7 @@ async def build_thread_choices(ctx: discord.AutocompleteContext):
     for channel_id in forum_channels:
         choices.append(ctx.interaction.guild.get_channel(channel_id))
     return choices
+
 
 class ThreadsCog(commands.Cog):
     """
@@ -166,7 +201,8 @@ class ThreadsCog(commands.Cog):
         await self.bot.wait_until_ready()
         async with aiosqlite.connect(self.bot.db_location) as db:
             if channel:
-                async with db.execute("SELECT thread_id, note_id FROM threads WHERE channel_id = ?", (channel.id,)) as cursor:
+                async with db.execute("SELECT thread_id, note_id FROM threads WHERE channel_id = ?",
+                                      (channel.id,)) as cursor:
                     threads = await cursor.fetchall()
             else:
                 async with db.execute("SELECT thread_id, note_id FROM threads") as cursor:
@@ -210,6 +246,9 @@ class ThreadsCog(commands.Cog):
             self.logger.info(f"New thread in forum: {thread.parent.name}, {thread.name}")
             m = await thread.send("Welcome to the thread! This message will be updated when I receive information from "
                                   "the database!")
+            guild_members = copy(thread.guild.members)
+            await thread.send("Assign a user to this thread", view=UserSelectAssignView(
+                guild_members, self.bot.db_location))
             settings = await util.get_settings(thread.guild)
             try:
                 defaultNote = settings["defaultNote"][str(thread.parent.id)]
@@ -246,7 +285,7 @@ class ThreadsCog(commands.Cog):
             message (discord.Message): The message that was sent.
         """
         try:
-            message.channel.parent.id # Are we inside a thread?
+            message.channel.parent.id  # Are we inside a thread?
         except AttributeError:
             return
 
@@ -311,7 +350,6 @@ class ThreadsCog(commands.Cog):
             await ctx.respond("❌ `This command can only be used in a forum post!`", ephemeral=True, delete_after=5)
             return
         note = await util.get_note(ctx.channel, replace_tags=False)
-        # Check if the user is the owner of the thread or has permissions
         if ctx.author.id != ctx.channel.owner_id and not await util.has_permission(ctx,
                                                                                    "manage_threads",
                                                                                    self.bot.db_location):
@@ -345,7 +383,8 @@ class ThreadsCog(commands.Cog):
         await ctx.send_modal(modal)
 
     @forum.command(name="refresh", description="Refresh the note for all forum threads")
-    @option(name="channel", description="The channel to refresh notes for", required=False, channel=True, autocomplete=build_thread_choices)
+    @option(name="channel", description="The channel to refresh notes for", required=False, channel=True,
+            autocomplete=build_thread_choices)
     async def update(self, ctx: discord.ApplicationContext, channel: discord.ForumChannel = None):
         """
         Update the note for all forum threads.
@@ -396,8 +435,9 @@ class ThreadsCog(commands.Cog):
             thread (discord.Thread): The thread to assign the user to.
         """
         if ctx.author.id != thread.owner_id and not await util.has_permission(ctx, "manage_threads",
-                                                                                   self.bot.db_location):
-            await ctx.respond("❌ `You do not have permission to assign users to threads!`", ephemeral=True, delete_after=5)
+                                                                              self.bot.db_location):
+            await ctx.respond("❌ `You do not have permission to assign users to threads!`", ephemeral=True,
+                              delete_after=5)
             return
         assigned = await utils.get_thread_assigned_users(thread)
         if user.id in assigned:
@@ -424,7 +464,8 @@ class ThreadsCog(commands.Cog):
         """
         if ctx.author.id != ctx.channel.owner_id and not await util.has_permission(ctx, "manage_threads",
                                                                                    self.bot.db_location):
-            await ctx.respond("❌ `You do not have permission to assign users to threads!`", ephemeral=True, delete_after=5)
+            await ctx.respond("❌ `You do not have permission to assign users to threads!`", ephemeral=True,
+                              delete_after=5)
             return
         async with aiosqlite.connect(self.bot.db_location) as db:
             async with db.execute("SELECT assigned_discord_ids FROM threads WHERE thread_id = ?",
@@ -454,9 +495,10 @@ class ThreadsCog(commands.Cog):
             thread (discord.Thread): The thread to list users for.
         """
         if ctx.author.id != thread.owner_id and not await util.has_permission(ctx, "manage_threads",
-                                                                                      self.bot.db_location):
-                await ctx.respond("❌ `You do not have permission to assign users to threads!`", ephemeral=True, delete_after=5)
-                return
+                                                                              self.bot.db_location):
+            await ctx.respond("❌ `You do not have permission to assign users to threads!`", ephemeral=True,
+                              delete_after=5)
+            return
         assigned = await utils.get_thread_assigned_users(thread)
         users = [ctx.guild.get_member(user) for user in assigned]
         users = [{"name": user.name, "value": f"Mention: {user.mention}"} for user in users if user]
