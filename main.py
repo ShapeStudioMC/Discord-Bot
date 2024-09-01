@@ -31,6 +31,7 @@ from discord.ext import commands
 import sqlite3
 import utils
 
+# ✔ ❌
 # Check if debug.log exists and clear it if it exceeds 1MiB
 if os.path.exists("debug.log"):
     print(
@@ -129,13 +130,14 @@ if __name__ == "__main__":
     conn = sqlite3.connect(bot.db_location)
     c = conn.cursor()
     c.execute("CREATE TABLE IF NOT EXISTS embeds (embed_id INTEGER PRIMARY KEY NOT NULL,"
-              "data TEXT NOT NULL, guild_id INT NOT NULL, name TEXT NOT NULL UNIQUE);")
+              "data TEXT NOT NULL, guild_id INT NOT NULL, name TEXT NOT NULL UNIQUE, settings TEXT);")
     c.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY NOT NULL,"
               "permissions TEXT);")
     c.execute("CREATE TABLE IF NOT EXISTS guilds (guild_id INTEGER PRIMARY KEY NOT NULL,"
               "settings TEXT, thread_channels TEXT);")
     c.execute("CREATE TABLE IF NOT EXISTS threads (thread_id INTEGER PRIMARY KEY NOT NULL,"
-              "channel_id INT NOT NULL, note TEXT, note_id INTEGER, note_last_update INTEGER);")
+              "channel_id INT NOT NULL, note TEXT, note_id INTEGER, note_last_update INTEGER, "
+              "assigned_discord_ids TEXT);")
     conn.commit()
     conn.close()
     logging.info("Starting bot")

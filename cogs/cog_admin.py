@@ -8,7 +8,7 @@ from discord.ext import commands
 import utils
 
 
-class admin_cog(commands.Cog):
+class AdminCog(commands.Cog):
     def __init__(self, bot, logger):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.handlers = logger.handlers
@@ -36,12 +36,11 @@ class admin_cog(commands.Cog):
 
     @permissions.command(name="show", description="Show a users permissions.")
     async def show(self, ctx: discord.ApplicationContext, member: discord.Member):
-        if not await utils.has_permission(ctx.author.id, "manage_local_permissions", self.bot.db_location):
-            await ctx.respond("You do not have permission to show local permissions", ephemeral=True)
+        if not await utils.has_permission(ctx, "manage_local_permissions", self.bot.db_location):
+            await ctx.respond("❌ `You do not have permission to show local permissions`", ephemeral=True)
             return
         else:
             user_id = member.id if member else ctx.author.id
-            print(f"member: {member}, user_id: {user_id}")
             async with sqlite.connect(self.bot.db_location) as db:
                 async with db.execute("SELECT permissions FROM users WHERE user_id = ?", (user_id,)) as cursor:
                     permissions = await cursor.fetchone()
@@ -53,8 +52,6 @@ class admin_cog(commands.Cog):
             embed = discord.Embed(title="Permissions")
             for key, value in permissions.items():
                 embed.add_field(name=key, value='✅' if value else '❌')
-            print(os.getenv("BYPASS_PERMISSIONS"))
-            print(type(os.getenv("BYPASS_PERMISSIONS")))
             if str(member.id) in os.getenv("BYPASS_PERMISSIONS"):
                 embed.add_field(name="This user is a bot admin", value="They have all permissions")
             embed.set_author(name=f"Permissions for {member.display_name}", icon_url=member.avatar.url)
@@ -64,8 +61,7 @@ class admin_cog(commands.Cog):
     @option(name="permission", description="The permission you want to grant/revoke", required=True,
             choices=["manage_local_permissions", "manage_embeds", "manage_threads"])
     async def modify(self, ctx: discord.ApplicationContext, member: discord.Member, permission: str):
-        # if they have permission to manage local permissions or they have the manage permissions permission in discord
-        if await utils.has_permission(ctx.author.id, "manage_local_permissions", self.bot.db_location):
+        if await utils.has_permission(ctx, "manage_local_permissions", self.bot.db_location):
             async with sqlite.connect(self.bot.db_location) as db:
                 async with db.execute("SELECT permissions FROM users WHERE user_id = ?", (member.id,)) as cursor:
                     permissions = await cursor.fetchone()
@@ -81,27 +77,27 @@ class admin_cog(commands.Cog):
                 async with sqlite.connect(self.bot.db_location) as db:
                     await db.execute("UPDATE users SET permissions = ? WHERE user_id = ?", (permissions, member.id))
                     await db.commit()
-                await ctx.respond(f"Set {permission} for {member.display_name} to {print_perm}", ephemeral=True)
+                await ctx.respond(f"✔ `Set {permission} for {member.display_name} to {print_perm}`", ephemeral=True)
             else:
-                await ctx.respond(f"Invalid permission: {permission}", ephemeral=True)
+                await ctx.respond(f"❌ `Invalid permission: {permission}`", ephemeral=True)
         else:
-            await ctx.respond("You do not have permission to manage local permissions", ephemeral=True)
+            await ctx.respond("❌ `You do not have permission to manage local permissions`", ephemeral=True)
 
     @forum.command(name="remove", description="Remove a forum channel")
     async def remove(self, ctx: discord.ApplicationContext, channel: discord.ForumChannel):
-        if not utils.has_permission(ctx.author.id, "manage_threads", self.bot.db_location):
-            await ctx.respond("You do not have permission to manage threads", ephemeral=True)
+        if not await utils.has_permission(ctx, "manage_threads", self.bot.db_location):
+            await ctx.respond("❌ `You do not have permission to manage threads`", ephemeral=True)
             return
         forum_channels = await utils.get_forum_channels(ctx.guild)
         if ctx.channel.id not in forum_channels:
-            await ctx.respond("This channel is not set up as a forum channel", ephemeral=True)
+            await ctx.respond("❌ `This channel is not set up as a forum channel`", ephemeral=True)
             return
         forum_channels.remove(ctx.channel.id)
         async with sqlite.connect(self.bot.db_location) as db:
             await db.execute("UPDATE guilds SET thread_channels = ? WHERE guild_id = ?",
                              (",".join([str(channel) for channel in forum_channels]), ctx.guild.id))
             await db.commit()
-        await ctx.respond(f"Channel {channel.name} has been removed as a forum channel", ephemeral=True)
+        await ctx.respond(f"✔ `Channel {channel.name} has been removed as a forum channel`", ephemeral=True)
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -109,4 +105,4 @@ class admin_cog(commands.Cog):
 
 
 def setup(bot):
-    bot.add_cog(admin_cog(bot, bot.logger))
+    bot.add_cog(AdminCog(bot, bot.logger))

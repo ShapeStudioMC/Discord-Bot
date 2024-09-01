@@ -14,13 +14,13 @@ import utils
 from cogs.cog_threads import NoteModal
 
 """
-a variable to set the colorcode
 a boolean variable setting an edit button or not (so having an option implemented to have the edit button for easier usage)
-a none, daily, everytime option setting;
-daily meaning it to repost the embed every 24 hours, deleting the last one
-everytime meaning reposting when edited, deleting the last one
+a variable bar where you can choose between "none", "daily" or "everytime";
+ - "daily" meaning that the same message will be reposted every 24 hours, deleting the last one meaning there will be just one message at all times
+ - "everytime" meaning message will be reposting when the message gets edited edited, it will also delete the last one message that was edited, this will there will be just one message at all times
 /embed namechange
 /embed name list
+/embed edit (modal)
 """
 
 class EditEmbedModal(NoteModal):
@@ -45,7 +45,7 @@ class EditEmbedModal(NoteModal):
             await db.execute("UPDATE embeds SET data = ? WHERE name = ?",
                              (new_embed, self.embed_name))
             await db.commit()
-        await interaction.followup.send("Embed updated!", ephemeral=True, delete_after=5)
+        await interaction.followup.send("✔ `Embed updated!`", ephemeral=True, delete_after=5)
         return True
 
 class DisplayExampleEmbedView(discord.ui.View):
@@ -63,7 +63,7 @@ class DisplayExampleEmbedView(discord.ui.View):
             button (discord.ui.Button): The button object.
             interaction (discord.Interaction): The interaction object.
         """
-        if interaction.user.id == self.original_user_id and await utils.has_permission(interaction.user.id, "manage_embeds",
+        if interaction.user.id == self.original_user_id and await utils.has_permission(interaction, "manage_embeds",
                                                                                self.db_location):
             await interaction.response.defer()
             async with aiosqlite.connect(self.db_location) as db:
@@ -75,18 +75,18 @@ class DisplayExampleEmbedView(discord.ui.View):
                     await db.execute("INSERT INTO embeds (data, guild_id, name) VALUES (?, ?, ?)",
                                      (cjson.dumps(json_embeds), interaction.guild.id, data[-1].description.split("**")[1]))
                 except sqlite3.IntegrityError:
-                    await interaction.response.send_message("Embed with that name already exists", ephemeral=True)
+                    await interaction.response.send_message("❌ `Embed with that name already exists`", ephemeral=True)
                     return
                 await db.commit()
             await interaction.delete_original_response()
-            await interaction.followup.send("Embed saved successfully", ephemeral=True)
+            await interaction.followup.send("✔ `Embed saved successfully`", ephemeral=True)
             return True
         elif interaction.user.id == self.original_user_id:
-            await interaction.response.send_message("You do not have permission to respond (Not command author)",
+            await interaction.response.send_message("❌ `You do not have permission to respond (Not command author)`",
                                                     ephemeral=True)
         else:
-            await interaction.response.send_message("You do not have permission to create embeds (Missing "
-                                                    "'manage_embeds' permission)", ephemeral=True)
+            await interaction.response.send_message("❌ 1You do not have permission to create embeds (Missing "
+                                                    "'manage_embeds' permission)`", ephemeral=True)
 
     @discord.ui.button(style=discord.ButtonStyle.danger, label="No")
     async def button_no_callback(self, button: discord.ui.Button, interaction: discord.Interaction):
@@ -98,9 +98,9 @@ class DisplayExampleEmbedView(discord.ui.View):
         """
         if interaction.user.id == self.original_user_id:
             await interaction.message.delete()
-            await interaction.respond("Embed not saved", ephemeral=True, delete_after=5)
+            await interaction.respond("❌ `Embed not saved`", ephemeral=True, delete_after=5)
         else:
-            await interaction.respond("You do not have permission to respond (Not command author)", ephemeral=True)
+            await interaction.respond("❌ `You do not have permission to respond (Not command author)`", ephemeral=True)
 
 async def build_embed_choices(ctx: discord.AutocompleteContext):
     """
@@ -122,7 +122,7 @@ async def build_embed_choices(ctx: discord.AutocompleteContext):
     return choices
 
 
-class embed_cog(commands.Cog):
+class EmbedCog(commands.Cog):
     """
     A cog for managing embeds.
 
@@ -176,18 +176,17 @@ class embed_cog(commands.Cog):
             json (str): The JSON data for the embed.
             name (str): The name of the embed.
         """
-        if await utils.has_permission(ctx.author.id, "manage_embeds", self.bot.db_location):
+        if await utils.has_permission(ctx, "manage_embeds", self.bot.db_location):
             if re.match(self.name_regex, name):
-                await ctx.respond("Invalid name. Name must contain only letters, numbers, spaces, and hyphens.",
+                await ctx.respond("❌ `Invalid name. Name must contain only letters, numbers, spaces, and hyphens.`",
                                   ephemeral=True)
                 return
             if json:
                 try:
                     embed_json = cjson.loads(json)
                 except cjson.JSONDecodeError:
-                    await ctx.respond("Invalid JSON. Please use a [discord embed generator]("
-                                      "https://message.style/app/editor) or a [JSON validator](https://jsonlint.com/)",
-                                      ephemeral=True)
+                    await ctx.respond("❌ `Invalid JSON provided. Please use a discord embed generator or a "
+                                      "JSON validator.`", ephemeral=True)
                     return
                 embeds = []
                 for embed in embed_json["embeds"]:
@@ -197,10 +196,10 @@ class embed_cog(commands.Cog):
                 await ctx.respond(embeds=embeds, view=DisplayExampleEmbedView(self.bot.db_location, ctx.author.id),
                                   ephemeral=True)
             else:
-                await ctx.respond("No JSON provided. Please use a [discord embed generator]("
-                                  "https://message.style/app/editor).", ephemeral=True)
+                await ctx.respond("❌ `No JSON provided. Please use a discord embed generator or a JSON validator.`",
+                                  ephemeral=True)
         else:
-            await ctx.respond("You do not have permission to manage embeds", ephemeral=True)
+            await ctx.respond("❌ `You do not have permission to manage embeds`", ephemeral=True)
 
     @embed.command(name="create", description="Create a new embed")
     @option(name="name", description="The name of the embed", required=True)
@@ -217,7 +216,7 @@ class embed_cog(commands.Cog):
                         embed_image: discord.Attachment = None, embed_thumbnail: str = None,
                         embed_author: discord.User = None, embed_fields: str = None, embed_footer: str = None):
 
-        if await utils.has_permission(ctx.author.id, "manage_embeds", self.bot.db_location):
+        if await utils.has_permission(ctx, "manage_embeds", self.bot.db_location):
             await ctx.defer()
             embed = discord.Embed(title=embed_title, description=embed_description,
                                   color=embed_color if embed_color else discord.Color.default())
@@ -243,7 +242,7 @@ class embed_cog(commands.Cog):
             await ctx.respond(embeds=embeds, view=DisplayExampleEmbedView(self.bot.db_location, ctx.author.id),
                             ephemeral=True)
         else:
-            await ctx.respond("You do not have permission to manage embeds", ephemeral=True)
+            await ctx.respond("❌ `You do not have permission to manage embeds`", ephemeral=True)
 
 
     @embed.command(name="post", description="Post an embed to the Chat")
@@ -305,7 +304,7 @@ class embed_cog(commands.Cog):
                     embeds.append(discord.Embed.from_dict(embed))
                 await ctx.respond(embeds=embeds, ephemeral=False)
             else:
-                await ctx.respond(f"Embed with a name of {name} was not found", ephemeral=True)
+                await ctx.respond(f"❌ `Embed with a name of {name} was not found`", ephemeral=True)
 
     @embed.command(name="delete", description="Delete an embed")
     @option(name="name", description="The name of the embed", required=False, autocomplete=build_embed_choices)
@@ -331,10 +330,10 @@ class embed_cog(commands.Cog):
                     await db.execute("DELETE FROM embeds WHERE name = ? AND guild_id = ?", (name, ctx.guild.id))
                     await db.commit()
                 await interaction.delete_original_response()
-                await ctx.respond(f"Embed with the name of {name} has been deleted.", ephemeral=True)
+                await ctx.respond(f"✔ `Embed with the name of {name} has been deleted.`", ephemeral=True)
                 return True
 
-        if await utils.has_permission(ctx.author.id, "manage_embeds", self.bot.db_location):
+        if await utils.has_permission(ctx, "manage_embeds", self.bot.db_location):
             if name is None or name == "":
                 view = discord.ui.View()
                 avalible_embeds = self.build_embed_choices(ctx.guild.id)
@@ -359,9 +358,9 @@ class embed_cog(commands.Cog):
                     async with aiosqlite.connect(self.bot.db_location) as db:
                         await db.execute("DELETE FROM embeds WHERE name = ? AND guild_id = ?", (name, ctx.guild.id))
                         await db.commit()
-                    await ctx.respond(f"Embed with the name of {name} has been deleted.", ephemeral=True)
+                    await ctx.respond(f"✔ `Embed with the name of {name} has been deleted.`", ephemeral=True)
                     return True
-            await ctx.respond(f"Could not find embed with the name of {name}.", ephemeral=True)
+            await ctx.respond(f"❌ `Could not find embed with the name of {name}.`", ephemeral=True)
 
     @embed.command(name="edit", description="Edit an embed")
     @option(name="name", description="The name of the embed", required=True, autocomplete=build_embed_choices)
@@ -391,7 +390,7 @@ class embed_cog(commands.Cog):
                 await interaction.response.send_modal(modal)
                 return True
 
-        if await utils.has_permission(ctx.author.id, "manage_embeds", self.bot.db_location):
+        if await utils.has_permission(ctx, "manage_embeds", self.bot.db_location):
             if name is None or name == "":
                 view = discord.ui.View()
                 avalible_embeds = self.build_embed_choices(ctx.guild.id)
@@ -415,9 +414,9 @@ class embed_cog(commands.Cog):
                 if data:
                     await ctx.send_modal(EditEmbedModal(embed=data[0], embed_name=name, db_location=self.bot.db_location))
                     return True
-            await ctx.respond(f"Could not find embed with the name of {name}.", ephemeral=True)
+            await ctx.respond(f"❌ `Could not find embed with the name of {name}.`", ephemeral=True)
         else:
-            await ctx.respond("You do not have permission to manage embeds", ephemeral=True)
+            await ctx.respond("❌ `You do not have permission to manage embeds`", ephemeral=True)
 
     @embed.command(name="rename", description="Rename an embed")
     @option(name="name", description="The name of the embed", required=True, autocomplete=build_embed_choices)
@@ -431,9 +430,9 @@ class embed_cog(commands.Cog):
             name (str): The name of the embed.
             new_name (str): The new name of the embed.
         """
-        if await utils.has_permission(ctx.author.id, "manage_embeds", self.bot.db_location):
+        if await utils.has_permission(ctx, "manage_embeds", self.bot.db_location):
             if name is None or name == "":
-                await ctx.respond("No embed provided!", ephemeral=True)
+                await ctx.respond("❌ `No embed provided!`", ephemeral=True)
                 return
             elif (name != "" and name is not None) and not re.match(self.name_regex, name):
                 async with aiosqlite.connect(self.bot.db_location) as db:
@@ -445,11 +444,11 @@ class embed_cog(commands.Cog):
                         await db.execute("UPDATE embeds SET name = ? WHERE name = ? AND guild_id = ?",
                                          (new_name, name, ctx.guild.id))
                         await db.commit()
-                    await ctx.respond(f"Embed with the name of {name} has been renamed to {new_name}.", ephemeral=True)
+                    await ctx.respond(f"✔ `Embed with the name of {name} has been renamed to {new_name}.`", ephemeral=True)
                     return True
-            await ctx.respond(f"Could not find embed with the name of {name}.", ephemeral=True)
+            await ctx.respond(f"❌ `Could not find embed with the name of {name}.`", ephemeral=True)
         else:
-            await ctx.respond("You do not have permission to manage embeds", ephemeral=True)
+            await ctx.respond("❌ `You do not have permission to manage embeds`", ephemeral=True)
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -462,4 +461,4 @@ def setup(bot):
     Args:
         bot (commands.Bot): The bot instance.
     """
-    bot.add_cog(embed_cog(bot, bot.logger))
+    bot.add_cog(EmbedCog(bot, bot.logger))

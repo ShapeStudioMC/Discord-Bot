@@ -1,7 +1,6 @@
 import json
 import os
 import re
-
 import aiosqlite as sqlite
 import discord
 import datetime
@@ -11,12 +10,13 @@ import requests
 # Default settings for the bot
 DEFAULT_SETTINGS = {
     "defaultNote": {"default": "Hello! This space can be used to keep notes about the current project in this "
-                               "thread. To edit this note please use the `/forum note` command. If you would like to"
+                               "thread. To edit this note please use the `/forum note` command. If you would like to "
                                "change what this message says by default please use the `/forum default_note` command."}
 }
 
 # Tags used in the notes
-TAGS = ["<DATE_OPENED>", "<LAST_UPDATED>", "<THREAD_NAME>", "<THREAD_OWNER_MENTION>", "<THREAD_OWNER_USERNAME>"]
+TAGS = ["<DATE_OPENED>", "<LAST_UPDATED>", "<THREAD_NAME>", "<THREAD_POSTER_MENTION>", "<THREAD_POSTER_USERNAME>",
+        "<EDIT_PERMISSIONS_LIST>", "<ASSIGNED_LIST>"]
 CODE_BLOCK_CHAR = "`"
 
 HEX_REGEX = r"^(?:[0-9a-fA-F]{3}){1,2}$"
@@ -63,21 +63,36 @@ def convert_permission(permissions: str | dict) -> dict | str:
         raise TypeError("Permissions must be a string or a dictionary")
 
 
-async def has_permission(user_id: int, permission: str, database_location: str) -> bool:
+async def has_permission(ctx: discord.ApplicationContext, permission: str, database_location: str) -> bool:
     """
     Check if a user has a specific permission
 
     :param database_location: The location of the database
-    :param user_id: The user ID to check
+    :param ctx: The context of the command
     :param permission: The permission to check
     :return: True if the user has the permission, False otherwise
     """
+    user_id = ctx.author.id
+    try:
+        if ctx.channel:
+            users = await get_thread_assigned_users(ctx.channel)
+            if user_id in users:
+                return True
+    except AttributeError:
+        pass
     if str(user_id) in os.getenv('BYPASS_PERMISSIONS'):
         return True
+
     async with sqlite.connect(database_location) as db:
         async with db.execute("SELECT permissions FROM users WHERE user_id = ?", (user_id,)) as cursor:
             permissions = await cursor.fetchone()
-    permissions = convert_permission(permissions[0])
+    try:
+        permissions = convert_permission(permissions[0])
+    except TypeError:
+        async with sqlite.connect(database_location) as db:
+            await db.execute("INSERT INTO users (user_id, permissions) VALUES (?, ?)", (user_id, ""))
+            await db.commit()
+            permissions = convert_permission("")
     return permissions[permission]
 
 
@@ -242,18 +257,25 @@ async def render_text(text: str, thread: discord.Thread):
         if char == CODE_BLOCK_CHAR:
             inside_code_block = not inside_code_block
         if not inside_code_block:
-            if "".join(text_ar[i:i + len(TAGS[0])]) == TAGS[0]:
-                # Date opened should be when the thread was created
+            if "".join(text_ar[i:i + len(TAGS[0])]) == TAGS[0]: # Date opened
                 text_ar[i:i + len(TAGS[0])] = str(to_discord_timestamp(thread.created_at.timestamp()))
-            elif "".join(text_ar[i:i + len(TAGS[1])]) == TAGS[1]:
+            elif "".join(text_ar[i:i + len(TAGS[1])]) == TAGS[1]: # LAST_UPDATED
                 note = await get_note(thread, False)
                 text_ar[i:i + len(TAGS[1])] = str(to_discord_timestamp(note[1]))
-            elif "".join(text_ar[i:i + len(TAGS[2])]) == TAGS[2]:
+            elif "".join(text_ar[i:i + len(TAGS[2])]) == TAGS[2]: # THREAD_NAME
                 text_ar[i:i + len(TAGS[2])] = thread.name
-            elif "".join(text_ar[i:i + len(TAGS[3])]) == TAGS[3]:
+            elif "".join(text_ar[i:i + len(TAGS[3])]) == TAGS[3]: # THREAD_POSTER_MENTION
                 text_ar[i:i + len(TAGS[3])] = thread.owner.mention
-            elif "".join(text_ar[i:i + len(TAGS[4])]) == TAGS[4]:
+            elif "".join(text_ar[i:i + len(TAGS[4])]) == TAGS[4]: # THREAD_POSTER_USERNAME
                 text_ar[i:i + len(TAGS[4])] = thread.owner.display_name
+            elif "".join(text_ar[i:i + len(TAGS[5])]) == TAGS[5]: # EDIT_PERMISSIONS_LIST
+                assigned_users = await get_all_allowed_users(thread)
+                assigned_users = [f"<@{user}>" for user in assigned_users] if assigned_users else ["No one can edit this note."]
+                text_ar[i:i + len(TAGS[5])] = ", ".join(assigned_users)
+            elif "".join(text_ar[i:i + len(TAGS[6])]) == TAGS[6]: # ASSIGNED_LIST
+                assigned_users = await get_thread_assigned_users(thread)
+                assigned_users = [f"<@{user}>" for user in assigned_users] if assigned_users else ["No one has been assigned."]
+                text_ar[i:i + len(TAGS[6])] = ", ".join(assigned_users)
     return "".join(text_ar)
 
 
@@ -361,3 +383,89 @@ def is_color(color: str | discord.Color):
     if re.match(HEX_REGEX, color):
         return discord.Color(value=int(color, 16))
     return False
+
+async def get_thread_assigned_users(thread: discord.Thread):
+    """
+    Get the users assigned to a thread
+
+    :param thread: The thread to get the assigned users for
+    :return list: The assigned users
+    """
+    async with sqlite.connect(os.getenv('DATABASE_LOCATION')) as db:
+        async with db.execute("SELECT assigned_discord_ids FROM threads WHERE thread_id = ?", (thread.id,)) as cursor:
+            assigned_users = await cursor.fetchone()
+    if assigned_users:
+        try:
+            return json.loads(assigned_users[0])
+        except TypeError:
+            async with sqlite.connect(os.getenv('DATABASE_LOCATION')) as db:
+                await db.execute("UPDATE threads SET assigned_discord_ids = ? WHERE thread_id = ?",
+                                 (json.dumps([]), thread.id))
+                await db.commit()
+            return []
+    return []
+
+async def store_thread_assigned_users(thread: discord.Thread, assigned_users: list):
+    """
+    Store the assigned users for a thread
+
+    :param thread: The thread to store the assigned users for
+    :param assigned_users: The users to store
+    """
+    async with sqlite.connect(os.getenv('DATABASE_LOCATION')) as db:
+        await db.execute("UPDATE threads SET assigned_discord_ids = ? WHERE thread_id = ?",
+                         (json.dumps(assigned_users), thread.id))
+        await db.commit()
+    return
+
+def paginator(items, embed_data, per_page=10, hard_limit=100, author: discord.User = None):
+    """This function builds a complete list of embeds for the paginator.
+    Args:
+        items (list): The list of items to paginate.
+        embed_data (dict): The data for the embeds.
+        author (discord.User): The author of the embeds.
+        per_page (int): The amount of items per page.
+        hard_limit (int): The hard limit of pages.
+    Returns:
+        list: A list of embeds for the paginator.
+    """
+    pages = []
+    # Split the list into chunks of 10
+    chunks = [items[i:i + per_page] for i in range(0, len(items), per_page)]
+    # Check if the amount of chunks is larger than the hard limit
+    if len(chunks) > hard_limit:
+        # If it is, then we will just return the first 100 pages
+        chunks = chunks[:hard_limit]
+    # Loop through the chunks
+    index = 1
+    for chunk in chunks:
+        # Create a new embed
+        embed = discord.Embed(**embed_data)
+        embed.title = embed_data['title']
+        embed.description = embed_data['description']
+        embed.set_footer(text=f"Page {index}/{len(chunks)}")
+        # set Description
+        if author:
+            embed.set_author(name=author.name, icon_url=author.avatar.url, url=author.jump_url)
+        # Add the items to the embed
+        for item in chunk:
+            embed.add_field(name=f"{index}. {item['name']}",
+                            value=f"{item['value']}",
+                            inline=False)
+            index += 1
+        # Add the embed to the pages
+        pages.append(embed)
+    return pages
+
+async def get_all_allowed_users(thread: discord.Thread):
+    """
+    Get all the users allowed to edit a thread's note
+
+    :param ctx: The context of the command
+    :param thread: The thread to get the allowed users for
+    :return: The allowed users
+    """
+    allowed_users = [thread.owner.id] # add the thread owner
+    allowed_users += [int(user) for user in os.getenv("BYPASS_PERMISSIONS").split(",")] # add all bypass permissions
+    allowed_users += await get_thread_assigned_users(thread) # get all users assigned to the thread
+    return list(dict.fromkeys(allowed_users)) # remove duplicates
