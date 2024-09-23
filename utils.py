@@ -1,6 +1,9 @@
 import json
 import os
 import re
+from imp import get_tag
+from typing import Any, Dict, Coroutine
+
 import aiosqlite as sqlite
 import discord
 import datetime
@@ -11,7 +14,8 @@ import requests
 DEFAULT_SETTINGS = {
     "defaultNote": {"default": "Hello! This space can be used to keep notes about the current project in this "
                                "thread. To edit this note please use the `/forum note` command. If you would like to "
-                               "change what this message says by default please use the `/forum default_note` command."}
+                               "change what this message says by default please use the `/forum default_note` command."},
+    "discordTags": {}
 }
 
 # Tags used in the notes
@@ -178,12 +182,25 @@ async def build_forum_embed(thread: discord.Thread = None, note: str = None):
         note = (note, time_since_epoch(), None)
     else:
         raise ValueError("You must provide either a thread or a note")
-    embed = discord.Embed(title="📝 Notes", description=note[0], color=0x17e670)
+    try:
+        embed = discord.Embed(title="📝 Notes", description=note[0], color=discord.Color.blue())
+    except TypeError:
+        embed = discord.Embed(title="📝 Notes", description="An error occurred while trying to get the note. Please check the database.",
+                              color=discord.Color.red())
+    try:
+        embed.add_field(name=f"Assigned to",
+                        value=f"{', '.join([f'<@{user}>' for user in await get_thread_assigned_users(thread)]) if await get_thread_assigned_users(thread) else 'No one has been assigned.'}",
+                        inline=True)
+    except TypeError:
+        embed.add_field(name=f"Assigned to", value="No one has been assigned.", inline=True)
+    embed.add_field(name=f"Created",
+                        value=f"by {thread.owner.mention} at {to_discord_timestamp(thread.created_at.timestamp())}")
     try:
         embed.add_field(name=f"Last updated",
                         value=f"{to_discord_timestamp(note[1]) if note[1] is not None else 'an unknown time'}")
     except TypeError:
-        embed.set_footer(text="Last updated at an unknown time. Please check the database.")
+        embed.add_field(name=f"Last updated",
+                        value=f"Last updated at an unknown time. Please check the database.")
     return embed
 
 
@@ -469,3 +486,29 @@ async def get_all_allowed_users(thread: discord.Thread):
     allowed_users += [int(user) for user in os.getenv("BYPASS_PERMISSIONS").split(",")] # add all bypass permissions
     allowed_users += await get_thread_assigned_users(thread) # get all users assigned to the thread
     return list(dict.fromkeys(allowed_users)) # remove duplicates
+
+
+def get_current_date():
+    """
+    Get the current date
+
+    :return tuple: The current date in the format (year, month, day, hour, minute, second)
+    """
+    return datetime.datetime.now().timetuple()[:6]
+
+
+def months():
+    return ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+
+async def safe_send(user: discord.User, message: str):
+    """
+    Send a message to a user safely
+
+    :param user: The user to send the message to
+    :param message: The message to send
+    """
+    try:
+        await user.send(message)
+        return True
+    except discord.errors.Forbidden:
+        return False

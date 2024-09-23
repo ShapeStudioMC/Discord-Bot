@@ -1,4 +1,4 @@
-# VERSION: 0.0.3
+# VERSION: 0.0.4
 # THIS IS FOR UPDATE CHECKING, DO NOT REMOVE
 
 """
@@ -38,7 +38,7 @@ if os.path.exists("debug.log"):
         f"debug.log exists, size: {os.path.getsize('debug.log')} bytes > 1MiB? "
         f"{os.path.getsize('debug.log') > 1048576}")
     if os.path.getsize("debug.log") > 1048576:
-        open("debug.log", "w").close()
+        os.remove("debug.log")
         print("Cleared debug.log")
 
 # Set up discord's built-in logging

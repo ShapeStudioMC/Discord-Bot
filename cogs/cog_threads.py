@@ -1,6 +1,9 @@
+import datetime
 import json
 import logging
 from copy import copy
+from pprint import pprint
+
 import discord
 from discord import option
 from discord.ext import commands, tasks
@@ -94,8 +97,10 @@ class DefaultNoteModal(NoteModal):
 
 
 class EditNoteButtonView(discord.ui.View):
-    def __init__(self, permitted_users, db_location):
+    def __init__(self, permitted_users, db_location, bot=None, logger=None):
         super().__init__()
+        self.bot = bot
+        self.logger = logger
         self.permitted_users = permitted_users
         self.db_location = db_location
 
@@ -111,44 +116,87 @@ class EditNoteButtonView(discord.ui.View):
                           db_location=util.get_db_location())
         await interaction.response.send_modal(modal)
 
+    @discord.ui.button(label="Assign User", style=discord.ButtonStyle.primary, custom_id="button_assign_user")
+    async def button_assign_user(self, button: discord.ui.Button, interaction: discord.Interaction):
+        self.permitted_users = await util.get_all_allowed_users(interaction.channel)
+        if interaction.user.id not in self.permitted_users:
+            await interaction.respond("❌ `You do not have permission to assign users to this thread!`", ephemeral=True)
+            return
+        guild_members = copy(interaction.guild.members)
+        await interaction.respond("Assign a user to this thread", view=UserSelectAssignView(
+            guild_members, self.db_location, interaction.followup,
+            await utils.get_thread_assigned_users(interaction.channel), self.bot, self.logger), ephemeral=True)
+
+
 class UserSelectAssignView(discord.ui.View):
-    def __init__(self, users, db_location):
+    def __init__(self, users, db_location, followup, assigned, bot=None, logger=None):
         super().__init__()
+        self.bot = bot
+        self.logger = logger
         self.users = users
         self.db_location = db_location
-        select = discord.ui.Select(placeholder="Select a user to assign", options=self.build_assign_choices())
+        self.followup = followup
+        select = discord.ui.Select(placeholder="Select a user to assign", options=self.build_assign_choices(assigned),
+                                   min_values=1, max_values=len(self.build_assign_choices()))
         select.callback = self.select_assign_user
         self.add_item(select)
 
-
-    def build_assign_choices(self):
+    def build_assign_choices(self, assigned=None):
+        if assigned is None:
+            assigned = []
         choices = []
         for user in self.users:
-            choices.append(discord.SelectOption(label=user.name, value=str(user.id)))
+            # if user.id not already assigned
+            if user.id not in assigned:
+                choices.append(discord.SelectOption(label=user.name, value=str(user.id)))
+            else:
+                choices.append(discord.SelectOption(label=f"(Already Assigned) {user.name}", value=str(user.id)))
         return choices
 
-
     async def select_assign_user(self, interaction: discord.Interaction):
-        await interaction.message.delete()
-        selected_user = interaction.data["values"][0]
-        user = interaction.guild.get_member(int(selected_user))
+        await interaction.response.defer()
+        # get all assigned users selected by the user
+        selected_users = interaction.data["values"]
+        added = 0
+        removed = 0
         assigned = await utils.get_thread_assigned_users(interaction.channel)
-        if user.id in assigned:
-            await interaction.respond("❌ `User is already assigned to this thread`", ephemeral=True)
-            return
-        assigned.append(user.id)
+        for selected_user in selected_users:
+            user = interaction.guild.get_member(int(selected_user))
+            if user.id in assigned:
+                assigned.remove(user.id)
+                # dm the user that they have been removed
+                if not await utils.safe_send(user, f"❌ `You have been unassigned from the \"{interaction.channel.name}\" thread by {interaction.user.name}`"):
+                    self.logger.warning(f"Failed to send message to {user.name}")
+                removed += 1
+            else:
+                assigned.append(user.id)
+                if not await utils.safe_send(user, f"✔ `You have been assigned to the \"{interaction.channel.name}\" "
+                                                   f"thread by {interaction.user.name}`\n[Click here to view the "
+                                                   f"thread]({interaction.channel.jump_url})"):
+                    self.logger.warning(f"Failed to send message to {user.name}")
+                added += 1
         async with aiosqlite.connect(self.db_location) as db:
             await db.execute("UPDATE threads SET assigned_discord_ids = ? WHERE thread_id = ?",
                              (json.dumps(assigned), interaction.channel.id))
             await db.commit()
-        await interaction.respond(f"✔ `User {user.name} has been assigned to this thread`", ephemeral=True)
+        await interaction.delete_original_response()
+        if added == 0 and removed == 0:
+            await interaction.followup.send("❌ `No changes made`", ephemeral=True)
+        elif len(selected_users) == 1:
+            await interaction.followup.send(
+                f"✔ `{'Assigned' if added else 'Unassigned'} {interaction.guild.get_member(int(selected_users[0])).name} from the thread`",
+                ephemeral=True)
+        else:
+            await interaction.followup.send(
+                f"✔ `Assigned {added} user(s) and unassigned {removed} user(s) from the thread`",
+                ephemeral=True)
+            # refresh the note
+        note = await util.get_note(interaction.channel)
+        m = await interaction.channel.fetch_message(note[2])
+        await m.edit(content=None, embed=await util.build_forum_embed(interaction.channel), view=EditNoteButtonView(
+            await util.get_all_allowed_users(interaction.channel), self.db_location, self.bot, self.logger))
+        return True
 
-
-class JumpButton(discord.ui.View):
-    def __init__(self, JumpURL):
-        super().__init__()
-        button = discord.ui.Button(label="Jump to Note", style=discord.ButtonStyle.url, url=JumpURL)
-        self.add_item(button)
 
 async def build_thread_choices(ctx: discord.AutocompleteContext):
     """
@@ -216,19 +264,26 @@ class ThreadsCog(commands.Cog):
                     await db.commit()
                 continue
             else:
-                m = await t.fetch_message(thread[1])
+                try:
+                    m = await t.fetch_message(thread[1])
+                except discord.errors.NotFound:
+                    self.logger.warning(f"Note message {thread[1]} not found, deleting from database.")
+                    async with aiosqlite.connect(self.bot.db_location) as db:
+                        await db.execute("DELETE FROM threads WHERE thread_id = ?", (thread[0],))
+                        await db.commit()
+                    continue
                 embed = await util.build_forum_embed(t)
                 try:
                     if embed.description == m.embeds[0].description:
-                        self.logger.info(f"Note for {t.name} is up to date, refreshing the button.")
+                        self.logger.info(f"Note for {t.name} is up to date, refreshing the buttons.")
                         await m.edit(view=EditNoteButtonView(
-                            await util.get_all_allowed_users(t), self.bot.db_location))
+                            await util.get_all_allowed_users(t), self.bot.db_location, self.bot, self.logger))
                         continue
                 except IndexError:
                     pass
                 self.logger.info(f"Note {t.name} is out of date, updating.")
                 await m.edit(embed=embed, content=None, view=EditNoteButtonView(
-                    await util.get_all_allowed_users(t), self.bot.db_location))
+                    await util.get_all_allowed_users(t), self.bot.db_location, self.bot, self.logger))
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -246,9 +301,6 @@ class ThreadsCog(commands.Cog):
             self.logger.info(f"New thread in forum: {thread.parent.name}, {thread.name}")
             m = await thread.send("Welcome to the thread! This message will be updated when I receive information from "
                                   "the database!")
-            guild_members = copy(thread.guild.members)
-            await thread.send("Assign a user to this thread", view=UserSelectAssignView(
-                guild_members, self.bot.db_location))
             settings = await util.get_settings(thread.guild)
             try:
                 defaultNote = settings["defaultNote"][str(thread.parent.id)]
@@ -284,33 +336,62 @@ class ThreadsCog(commands.Cog):
         Args:
             message (discord.Message): The message that was sent.
         """
+
+        if message.author.bot:
+            return
+
         try:
             message.channel.parent.id  # Are we inside a thread?
         except AttributeError:
             return
 
         if message.channel.parent.id in await util.get_forum_channels(message.guild):
+            self.logger.info(f"Trying to find note with an ID of {message.channel.id}")
             note = await util.get_note_message(message.channel)
-            deleted = False
-            c = 0
-            messages = 0
-            found_bot = False
-            for m in await message.channel.history(limit=20).flatten():
-                if m.author.id == self.bot.user.id:
-                    found_bot = True
-                    if c == 0:
-                        break
-                    if m.id != note.id:
-                        await m.delete()
-                    deleted = True
+            self.logger.info(f"Returned note: {note}")
+            # The message’s creation time in UTC.
+            if note is not None:
+                note_sent = note.created_at.timestamp()
+            else:
+                note_sent = 0
+            if note_sent < (datetime.datetime.utcnow() - datetime.timedelta(hours=24)).timestamp():
+                new_note = await message.channel.send(embed=await util.build_forum_embed(message.channel),
+                                                      view=EditNoteButtonView(
+                                                          await util.get_all_allowed_users(message.channel),
+                                                          self.bot.db_location, self.bot, self.logger))
+                async with aiosqlite.connect(self.bot.db_location) as db:
+                    await db.execute("UPDATE threads SET note_id = ?, note_last_update = ? WHERE thread_id = ?",
+                                     (new_note.id, util.time_since_epoch(), message.channel.id))
+                    await db.commit()
+
+    @commands.Cog.listener()
+    async def on_thread_update(self, before: discord.Thread, after: discord.Thread):
+        """
+        Event listener for when a thread is updated.
+
+        Args:
+            before (discord.Thread): The thread before the update.
+            after (discord.Thread): The thread after the update.
+        """
+        if after.parent.id in await util.get_forum_channels(after.guild):
+            self.logger.info(f"Thread updated: {after.name}")
+            if before.applied_tags != after.applied_tags:
+                self.logger.info(f"Discord tags updated for {after.name}")
+                # Modify the note to reflect the new discord tags applied to the post
+                # if any tag that matches the regex os.getenv("AUTO_LOCK_REGEX") is applied, lock the thread
+                if any(tag.name == os.getenv("AUTO_LOCK_TAG") for tag in after.applied_tags):
+                    await after.edit(locked=True)
+                    self.logger.info(f"Thread {after.name} locked due to tag application.")
                 else:
-                    messages += 1
-                c += 1
-            if (deleted or not found_bot) and messages > 10:
-                await message.channel.send("Jump to note", view=JumpButton(note.jump_url))
+                    await after.edit(locked=False)
+                    self.logger.info(f"Thread {after.name} unlocked due to tag removal.")
+            if before.name != after.name:
+                ...
+                # Working on this
+
 
     @forum.command(name="setup", description="Set up a channel as a forum channel to track")
-    @option(name="channel", description="The channel to set up", required=True, channel=True)
+    @option(name="channel", description="The channel to set up", required=True, channel=True, autocomplete=build_thread_choices)
     async def setup_forum(self, ctx: discord.ApplicationContext, channel: discord.ForumChannel):
         """
         Set up a channel as a forum channel to track.
