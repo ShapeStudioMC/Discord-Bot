@@ -1,9 +1,9 @@
+import asyncio
 import datetime
 import json
 import logging
+import re
 from copy import copy
-from pprint import pprint
-
 import discord
 from discord import option
 from discord.ext import commands, tasks
@@ -165,7 +165,8 @@ class UserSelectAssignView(discord.ui.View):
             if user.id in assigned:
                 assigned.remove(user.id)
                 # dm the user that they have been removed
-                if not await utils.safe_send(user, f"❌ `You have been unassigned from the \"{interaction.channel.name}\" thread by {interaction.user.name}`"):
+                if not await utils.safe_send(user,
+                                             f"❌ `You have been unassigned from the \"{interaction.channel.name}\" thread by {interaction.user.name}`"):
                     self.logger.warning(f"Failed to send message to {user.name}")
                 removed += 1
             else:
@@ -184,13 +185,13 @@ class UserSelectAssignView(discord.ui.View):
             await interaction.followup.send("❌ `No changes made`", ephemeral=True)
         elif len(selected_users) == 1:
             await interaction.followup.send(
-                f"✔ `{'Assigned' if added else 'Unassigned'} {interaction.guild.get_member(int(selected_users[0])).name} from the thread`",
+                f"✔ `{'Assigned' if added else 'Unassigned'} "
+                f"{interaction.guild.get_member(int(selected_users[0])).name} {'to' if added else 'from'} the thread`",
                 ephemeral=True)
         else:
             await interaction.followup.send(
                 f"✔ `Assigned {added} user(s) and unassigned {removed} user(s) from the thread`",
                 ephemeral=True)
-            # refresh the note
         note = await util.get_note(interaction.channel)
         m = await interaction.channel.fetch_message(note[2])
         await m.edit(content=None, embed=await util.build_forum_embed(interaction.channel), view=EditNoteButtonView(
@@ -237,6 +238,7 @@ class ThreadsCog(commands.Cog):
         self.logger.handlers = logger.handlers
         self.logger.setLevel(logger.level)
         self.logger.propagate = False
+        self.WARNING_COOLDOWN_MESSAGE = None
 
     forum = discord.SlashCommandGroup(name="forum", description="Commands for managing forum posts")
     assign = forum.create_subgroup(name="assign", description="Commands for assigning users to forum posts.")
@@ -336,8 +338,8 @@ class ThreadsCog(commands.Cog):
         Args:
             message (discord.Message): The message that was sent.
         """
-
-        if message.author.bot:
+        if message.author == self.bot.user:
+            print("Ignoring bot message")
             return
 
         try:
@@ -375,23 +377,85 @@ class ThreadsCog(commands.Cog):
         """
         if after.parent.id in await util.get_forum_channels(after.guild):
             self.logger.info(f"Thread updated: {after.name}")
+            if self.WARNING_COOLDOWN_MESSAGE is not None and (
+                    after.name.replace("🔒 ", "").replace(" (Locked)", "") == before.name.replace("🔒 ", "").replace(
+                    " (Locked)", "") or
+                    after.name == before.name):
+                await self.WARNING_COOLDOWN_MESSAGE.delete()
+                self.WARNING_COOLDOWN_MESSAGE = None
+            if before.locked and not after.locked:
+                t = await utils.safe_unlock_thread(after, True)
+                if t.upper() != "OK":
+                    self.logger.warning(f"Failed to rename {after.name} (Rate limited {t.split(':')[1]})")
+                    # create a task to rename the thread after the rate limit is lifted
+                    try:
+                        await self.rename_after_cooldown.start(after, after.name.replace("🔒 ", "")
+                                                               .replace(" (Locked)", ""))
+                    except RuntimeError:
+                        self.logger.warning("Rate limit task already running.")
+                # remove the locked tag from the thread if it is present
+                for tag in after.applied_tags:
+                    if re.match(utils.get_config("AUTO_LOCK_REGEX"), tag.name):
+                        after.applied_tags.remove(tag)
+                        self.logger.info(f"Tag {tag.name} removed due to thread unlocked.")
+                await after.edit(applied_tags=after.applied_tags)
             if before.applied_tags != after.applied_tags:
                 self.logger.info(f"Discord tags updated for {after.name}")
                 # Modify the note to reflect the new discord tags applied to the post
                 # if any tag that matches the regex os.getenv("AUTO_LOCK_REGEX") is applied, lock the thread
-                if any(tag.name == os.getenv("AUTO_LOCK_TAG") for tag in after.applied_tags):
-                    await after.edit(locked=True)
+                if any([re.match(utils.get_config("AUTO_LOCK_REGEX"), tag.name) for tag in after.applied_tags]):
+                    t = await utils.safe_lock_thread(after, True)
+                    if t.upper() != "OK":
+                        self.logger.warning(f"Failed to rename {after.name} (Rate limited {t.split(':')[1]})")
+                        # create a task to rename the thread after the rate limit is lifted
+                        try:
+                            await self.rename_after_cooldown.start(after, after.name.replace("🔒 ", "")
+                                                                   .replace(" (Locked)", ""))
+                        except RuntimeError:
+                            self.logger.warning("Rate limit task already running.")
                     self.logger.info(f"Thread {after.name} locked due to tag application.")
                 else:
-                    await after.edit(locked=False)
+                    t = await utils.safe_unlock_thread(after, True)
+                    if t.upper() != "OK":
+                        self.logger.warning(f"Failed to rename {after.name} (Rate limited {t.split(':')[1]})")
+                        # create a task to rename the thread after the rate limit is lifted
+                        try:
+                            await self.rename_after_cooldown.start(after, after.name.replace("🔒 ", "")
+                                                                    .replace(" (Locked)", ""))
+                        except RuntimeError:
+                            self.logger.warning("Rate limit task already running.")
                     self.logger.info(f"Thread {after.name} unlocked due to tag removal.")
-            if before.name != after.name:
-                ...
-                # Working on this
 
+    @tasks.loop()
+    async def rename_after_cooldown(self, thread: discord.Thread, name: str):
+        """
+        Rename a thread after the rate limit is lifted.
+
+        Args:
+            name (str): The new name for the thread.
+            thread (discord.Thread): The thread to rename.
+        """
+        can_rename = await utils.can_rename(thread)
+        # time since epoch when the rate limit will be lifted, as float
+        future_timestamp = datetime.datetime.now() + datetime.timedelta(seconds=int(can_rename[1]))
+        self.WARNING_COOLDOWN_MESSAGE = await thread.send(f"⚠️ `The thread will be renamed to {name} `"
+                                                          f"{utils.to_discord_timestamp(future_timestamp.timestamp(), 'R')}` due "
+                                                          f"to a rate limit`")
+        # start a loop to break when the rate limit is lifted
+        while not can_rename[0]:
+            can_rename = await utils.can_rename(thread)
+            self.logger.info(f"Rate limited! {can_rename[1]} seconds left.")
+            if can_rename[0]:
+                break
+            await asyncio.sleep(can_rename[1] if can_rename[1] < 60 else 60)
+        await self.WARNING_COOLDOWN_MESSAGE.edit(content=f"✔ `The thread will be renamed to {name} soon due to a rate "
+                                                         f"limit`")
+        await thread.edit(name=name)
+        return
 
     @forum.command(name="setup", description="Set up a channel as a forum channel to track")
-    @option(name="channel", description="The channel to set up", required=True, channel=True, autocomplete=build_thread_choices)
+    @option(name="channel", description="The channel to set up", required=True, channel=True,
+            autocomplete=build_thread_choices)
     async def setup_forum(self, ctx: discord.ApplicationContext, channel: discord.ForumChannel):
         """
         Set up a channel as a forum channel to track.
@@ -496,9 +560,7 @@ class ThreadsCog(commands.Cog):
             await ctx.respond("❌ `You do not have permission to close this thread!`", ephemeral=True, delete_after=5)
             return
         await ctx.respond("✔ `Thread closed!`", ephemeral=True, delete_after=5)
-        await ctx.channel.edit(archived=True, locked=True,
-                               name=f"🔒 {ctx.channel.name} (Closed)",
-                               reason=f"Closed by {ctx.author.name}")
+        await ctx.channel.edit(locked=True, name=f"🔒 {ctx.channel.name} (Closed)")
 
     ######
     # Assign Commands

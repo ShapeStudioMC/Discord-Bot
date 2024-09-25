@@ -10,12 +10,14 @@ import datetime
 import dotenv
 import requests
 
+# Load environment variables from .env
+dotenv.load_dotenv()
+
 # Default settings for the bot
 DEFAULT_SETTINGS = {
-    "defaultNote": {"default": "Hello! This space can be used to keep notes about the current project in this "
-                               "thread. To edit this note please use the `/forum note` command. If you would like to "
-                               "change what this message says by default please use the `/forum default_note` command."},
-    "discordTags": {}
+    "defaultNote": {"default": os.getenv('MASTER_NOTE')},
+    "discordTags": {},
+    "lastRename": {}
 }
 
 # Tags used in the notes
@@ -24,10 +26,6 @@ TAGS = ["<DATE_OPENED>", "<LAST_UPDATED>", "<THREAD_NAME>", "<THREAD_POSTER_MENT
 CODE_BLOCK_CHAR = "`"
 
 HEX_REGEX = r"^(?:[0-9a-fA-F]{3}){1,2}$"
-
-
-# Load environment variables from .env
-dotenv.load_dotenv()
 
 
 def convert_permission(permissions: str | dict) -> dict | str:
@@ -157,14 +155,15 @@ async def get_note(thread: discord.Thread, replace_tags: bool = True):
         return None
 
 
-def to_discord_timestamp(timestamp: int | float):
+def to_discord_timestamp(timestamp: int | float, type: str = "f"):
     """
     Convert a timestamp to a discord timestamp
 
     :param timestamp: The timestamp to convert
+    :param type: The type of timestamp to convert to
     :return: The discord timestamp
     """
-    return f"<t:{round(timestamp)}:f>"
+    return f"<t:{round(timestamp)}:{type}>"
 
 
 async def build_forum_embed(thread: discord.Thread = None, note: str = None):
@@ -185,7 +184,8 @@ async def build_forum_embed(thread: discord.Thread = None, note: str = None):
     try:
         embed = discord.Embed(title="📝 Notes", description=note[0], color=discord.Color.blue())
     except TypeError:
-        embed = discord.Embed(title="📝 Notes", description="An error occurred while trying to get the note. Please check the database.",
+        embed = discord.Embed(title="📝 Notes",
+                              description="An error occurred while trying to get the note. Please check the database.",
                               color=discord.Color.red())
     try:
         embed.add_field(name=f"Assigned to",
@@ -194,7 +194,7 @@ async def build_forum_embed(thread: discord.Thread = None, note: str = None):
     except TypeError:
         embed.add_field(name=f"Assigned to", value="No one has been assigned.", inline=True)
     embed.add_field(name=f"Created",
-                        value=f"by {thread.owner.mention} at {to_discord_timestamp(thread.created_at.timestamp())}")
+                    value=f"by {thread.owner.mention} at {to_discord_timestamp(thread.created_at.timestamp())}")
     try:
         embed.add_field(name=f"Last updated",
                         value=f"{to_discord_timestamp(note[1]) if note[1] is not None else 'an unknown time'}")
@@ -274,24 +274,26 @@ async def render_text(text: str, thread: discord.Thread):
         if char == CODE_BLOCK_CHAR:
             inside_code_block = not inside_code_block
         if not inside_code_block:
-            if "".join(text_ar[i:i + len(TAGS[0])]) == TAGS[0]: # Date opened
+            if "".join(text_ar[i:i + len(TAGS[0])]) == TAGS[0]:  # Date opened
                 text_ar[i:i + len(TAGS[0])] = str(to_discord_timestamp(thread.created_at.timestamp()))
-            elif "".join(text_ar[i:i + len(TAGS[1])]) == TAGS[1]: # LAST_UPDATED
+            elif "".join(text_ar[i:i + len(TAGS[1])]) == TAGS[1]:  # LAST_UPDATED
                 note = await get_note(thread, False)
                 text_ar[i:i + len(TAGS[1])] = str(to_discord_timestamp(note[1]))
-            elif "".join(text_ar[i:i + len(TAGS[2])]) == TAGS[2]: # THREAD_NAME
+            elif "".join(text_ar[i:i + len(TAGS[2])]) == TAGS[2]:  # THREAD_NAME
                 text_ar[i:i + len(TAGS[2])] = thread.name
-            elif "".join(text_ar[i:i + len(TAGS[3])]) == TAGS[3]: # THREAD_POSTER_MENTION
+            elif "".join(text_ar[i:i + len(TAGS[3])]) == TAGS[3]:  # THREAD_POSTER_MENTION
                 text_ar[i:i + len(TAGS[3])] = thread.owner.mention
-            elif "".join(text_ar[i:i + len(TAGS[4])]) == TAGS[4]: # THREAD_POSTER_USERNAME
+            elif "".join(text_ar[i:i + len(TAGS[4])]) == TAGS[4]:  # THREAD_POSTER_USERNAME
                 text_ar[i:i + len(TAGS[4])] = thread.owner.display_name
-            elif "".join(text_ar[i:i + len(TAGS[5])]) == TAGS[5]: # EDIT_PERMISSIONS_LIST
+            elif "".join(text_ar[i:i + len(TAGS[5])]) == TAGS[5]:  # EDIT_PERMISSIONS_LIST
                 assigned_users = await get_all_allowed_users(thread)
-                assigned_users = [f"<@{user}>" for user in assigned_users] if assigned_users else ["No one can edit this note."]
+                assigned_users = [f"<@{user}>" for user in assigned_users] if assigned_users else [
+                    "No one can edit this note."]
                 text_ar[i:i + len(TAGS[5])] = ", ".join(assigned_users)
-            elif "".join(text_ar[i:i + len(TAGS[6])]) == TAGS[6]: # ASSIGNED_LIST
+            elif "".join(text_ar[i:i + len(TAGS[6])]) == TAGS[6]:  # ASSIGNED_LIST
                 assigned_users = await get_thread_assigned_users(thread)
-                assigned_users = [f"<@{user}>" for user in assigned_users] if assigned_users else ["No one has been assigned."]
+                assigned_users = [f"<@{user}>" for user in assigned_users] if assigned_users else [
+                    "No one has been assigned."]
                 text_ar[i:i + len(TAGS[6])] = ", ".join(assigned_users)
     return "".join(text_ar)
 
@@ -401,6 +403,7 @@ def is_color(color: str | discord.Color):
         return discord.Color(value=int(color, 16))
     return False
 
+
 async def get_thread_assigned_users(thread: discord.Thread):
     """
     Get the users assigned to a thread
@@ -422,6 +425,7 @@ async def get_thread_assigned_users(thread: discord.Thread):
             return []
     return []
 
+
 async def store_thread_assigned_users(thread: discord.Thread, assigned_users: list):
     """
     Store the assigned users for a thread
@@ -434,6 +438,7 @@ async def store_thread_assigned_users(thread: discord.Thread, assigned_users: li
                          (json.dumps(assigned_users), thread.id))
         await db.commit()
     return
+
 
 def paginator(items, embed_data, per_page=10, hard_limit=100, author: discord.User = None):
     """This function builds a complete list of embeds for the paginator.
@@ -474,6 +479,7 @@ def paginator(items, embed_data, per_page=10, hard_limit=100, author: discord.Us
         pages.append(embed)
     return pages
 
+
 async def get_all_allowed_users(thread: discord.Thread):
     """
     Get all the users allowed to edit a thread's note
@@ -482,10 +488,10 @@ async def get_all_allowed_users(thread: discord.Thread):
     :param thread: The thread to get the allowed users for
     :return: The allowed users
     """
-    allowed_users = [thread.owner.id] # add the thread owner
-    allowed_users += [int(user) for user in os.getenv("BYPASS_PERMISSIONS").split(",")] # add all bypass permissions
-    allowed_users += await get_thread_assigned_users(thread) # get all users assigned to the thread
-    return list(dict.fromkeys(allowed_users)) # remove duplicates
+    allowed_users = [thread.owner.id]  # add the thread owner
+    allowed_users += [int(user) for user in os.getenv("BYPASS_PERMISSIONS").split(",")]  # add all bypass permissions
+    allowed_users += await get_thread_assigned_users(thread)  # get all users assigned to the thread
+    return list(dict.fromkeys(allowed_users))  # remove duplicates
 
 
 def get_current_date():
@@ -498,9 +504,11 @@ def get_current_date():
 
 
 def months():
-    return ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+    return ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+            "November", "December"]
 
-async def safe_send(user: discord.User, message: str):
+
+async def safe_send(user: discord.User | discord.Member, message: str):
     """
     Send a message to a user safely
 
@@ -512,3 +520,96 @@ async def safe_send(user: discord.User, message: str):
         return True
     except discord.errors.Forbidden:
         return False
+
+
+def get_config(key: str) -> str:
+    """
+    Get an environment variable
+
+    :param key: The key of the environment variable
+    :return: The value of the environment variable as a string
+    """
+    return str(os.getenv(key))
+
+
+async def safe_lock_thread(thread: discord.Thread, rename: bool = False):
+    """
+    Lock a thread
+
+    :param thread: The thread to lock
+    :param rename: Whether to rename the thread
+    """
+    settings = await get_settings(thread.guild)
+    out = "OK"
+    # check if thread was last renamed more than 5 minutes ago
+    if str(thread.id) in settings["lastRename"]:
+        if time_since_epoch() - int(settings["lastRename"][str(thread.id)]) < 300:
+            out = f"cooldown:{time_since_epoch() - settings['lastRename'][str(thread.id)]}"
+            rename = False
+    else:
+        settings["lastRename"][str(thread.id)] = time_since_epoch()
+        async with sqlite.connect(get_db_location()) as db:
+            await db.execute("UPDATE guilds SET settings = ? WHERE guild_id = ?",
+                             (json.dumps(settings), thread.guild.id))
+            await db.commit()
+    if rename:
+        await thread.edit(name=f"🔒 {thread.name} (Locked)", locked=True)
+        settings["lastRename"][str(thread.id)] = time_since_epoch()
+        async with sqlite.connect(get_db_location()) as db:
+            await db.execute("UPDATE guilds SET settings = ? WHERE guild_id = ?",
+                             (json.dumps(settings), thread.guild.id))
+            await db.commit()
+        return out
+    else:
+        await thread.edit(locked=True)
+        return out
+
+
+async def safe_unlock_thread(thread: discord.Thread, rename: bool = False):
+    """
+    Unlock a thread
+
+    :param thread: The thread to unlock
+    :param rename: Whether to rename the thread
+    :return: The outcome of the operation, either "OK" or "cooldown:<time>"
+    """
+    settings = await get_settings(thread.guild)
+    out = "OK"
+    # check if thread was last renamed more than 5 minutes ago
+    if str(thread.id) in settings["lastRename"].keys():
+        if time_since_epoch() - int(settings["lastRename"][str(thread.id)]) < 300:
+                out = f"cooldown:{time_since_epoch() - settings['lastRename'][str(thread.id)]}"
+                rename = False
+    else:
+        settings["lastRename"][str(thread.id)] = time_since_epoch()
+        async with sqlite.connect(get_db_location()) as db:
+            await db.execute("UPDATE guilds SET settings = ? WHERE guild_id = ?",
+                             (json.dumps(settings), thread.guild.id))
+            await db.commit()
+    if rename:
+        await thread.edit(name=thread.name.replace("🔒 ", "").replace(" (Locked)", ""), locked=False)
+        settings["lastRename"][str(thread.id)] = time_since_epoch()
+        async with sqlite.connect(get_db_location()) as db:
+            await db.execute("UPDATE guilds SET settings = ? WHERE guild_id = ?",
+                             (json.dumps(settings), thread.guild.id))
+            await db.commit()
+        return out
+    else:
+        await thread.edit(locked=False)
+        return out
+
+
+async def can_rename(thread):
+    """
+    Check if a thread can be renamed based on the cooldown.
+
+    :param thread: The thread to check
+    :return tuple: A tuple containing a boolean value and when the thread can be renamed again
+    """
+    settings = await get_settings(thread.guild)
+    if str(thread.id) in settings["lastRename"]:
+        if time_since_epoch() - int(settings["lastRename"][str(thread.id)]) < 300:
+            # return False and when the time when the thread can be renamed again
+            return False, 300 - (time_since_epoch() - int(settings["lastRename"][str(thread.id)]))
+    return True, -1
+
