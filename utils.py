@@ -74,7 +74,11 @@ async def has_permission(ctx: discord.ApplicationContext, permission: str, datab
     :param permission: The permission to check
     :return: True if the user has the permission, False otherwise
     """
-    user_id = ctx.author.id
+    try: # discord.ApplicationContext
+        user_id = ctx.author.id
+    except AttributeError: # discord.Interaction
+        user_id = ctx.user.id
+    print(f"User ID: {user_id}")
     try:
         if ctx.channel:
             users = await get_thread_assigned_users(ctx.channel)

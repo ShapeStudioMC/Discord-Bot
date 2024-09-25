@@ -1,4 +1,4 @@
-# VERSION: 0.0.4
+# VERSION: 0.0.5
 # THIS IS FOR UPDATE CHECKING, DO NOT REMOVE
 
 """
@@ -80,7 +80,7 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 
 # Set up bot intents
 intents = discord.Intents.default().all()
-bot = commands.AutoShardedBot(intents=intents)
+bot = commands.AutoShardedBot(intents=intents, debug_guilds=[1242097337837289472,])
 bot.logger = logger
 bot.db_location = os.getenv('DATABASE_LOCATION')
 

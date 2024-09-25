@@ -1,3 +1,4 @@
+import io
 import json as cjson
 import logging
 import os
@@ -22,6 +23,7 @@ a variable bar where you can choose between "none", "daily" or "everytime";
 /embed name list
 /embed edit (modal)
 """
+
 
 class EditEmbedModal(NoteModal):
     def __init__(self, embed, embed_name, db_location, *args, **kwargs) -> None:
@@ -48,11 +50,12 @@ class EditEmbedModal(NoteModal):
         await interaction.followup.send("✔ `Embed updated!`", ephemeral=True, delete_after=5)
         return True
 
+
 class DisplayExampleEmbedView(discord.ui.View):
     def __init__(self, db_location, user_id, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.db_location = db_location
-        self.original_user_id= user_id
+        self.original_user_id = user_id
 
     @discord.ui.button(style=discord.ButtonStyle.success, label="Yes")
     async def button_yes_callback(self, button: discord.ui.Button, interaction: discord.Interaction):
@@ -64,7 +67,7 @@ class DisplayExampleEmbedView(discord.ui.View):
             interaction (discord.Interaction): The interaction object.
         """
         if interaction.user.id == self.original_user_id and await utils.has_permission(interaction, "manage_embeds",
-                                                                               self.db_location):
+                                                                                       self.db_location):
             await interaction.response.defer()
             async with aiosqlite.connect(self.db_location) as db:
                 data = interaction.message.embeds
@@ -73,7 +76,8 @@ class DisplayExampleEmbedView(discord.ui.View):
                     json_embeds.append(embed.to_dict())
                 try:
                     await db.execute("INSERT INTO embeds (data, guild_id, name) VALUES (?, ?, ?)",
-                                     (cjson.dumps(json_embeds), interaction.guild.id, data[-1].description.split("**")[1]))
+                                     (cjson.dumps(json_embeds), interaction.guild.id,
+                                      data[-1].description.split("**")[1]))
                 except sqlite3.IntegrityError:
                     await interaction.response.send_message("❌ `Embed with that name already exists`", ephemeral=True)
                     return
@@ -101,6 +105,7 @@ class DisplayExampleEmbedView(discord.ui.View):
             await interaction.respond("❌ `Embed not saved`", ephemeral=True, delete_after=5)
         else:
             await interaction.respond("❌ `You do not have permission to respond (Not command author)`", ephemeral=True)
+
 
 async def build_embed_choices(ctx: discord.AutocompleteContext):
     """
@@ -130,6 +135,7 @@ class EmbedCog(commands.Cog):
         bot (commands.Bot): The bot instance.
         logger (logging.Logger): The logger instance.
     """
+
     def __init__(self, bot, logger):
         """
         Initialize the embed_cog.
@@ -162,7 +168,6 @@ class EmbedCog(commands.Cog):
         """
         await self.bot.wait_until_ready()
         self.embed_names = self.build_embed_choices()
-
 
     @embed.command(name="import", description="Import an embed from JSON")
     @option(name="json", description="The JSON for the embed", required=True)
@@ -212,9 +217,9 @@ class EmbedCog(commands.Cog):
     @option(name="embed-fields", description="The fields of the embed", required=False)
     @option(name="embed-footer", description="The footer of the embed", required=False)
     async def create(self, ctx: discord.ApplicationContext, name: str, embed_description: str,
-                        embed_color: discord.Color = None, embed_title: str = None,
-                        embed_image: discord.Attachment = None, embed_thumbnail: str = None,
-                        embed_author: discord.User = None, embed_fields: str = None, embed_footer: str = None):
+                     embed_color: discord.Color = None, embed_title: str = None,
+                     embed_image: discord.Attachment = None, embed_thumbnail: str = None,
+                     embed_author: discord.User = None, embed_fields: str = None, embed_footer: str = None):
 
         if await utils.has_permission(ctx, "manage_embeds", self.bot.db_location):
             await ctx.defer()
@@ -240,15 +245,14 @@ class EmbedCog(commands.Cog):
             embeds.append(discord.Embed(title="Embeds", description=f"Above are the embeds you provided. Would you "
                                                                     f"like to save them under the name **{name}**?"))
             await ctx.respond(embeds=embeds, view=DisplayExampleEmbedView(self.bot.db_location, ctx.author.id),
-                            ephemeral=True)
+                              ephemeral=True)
         else:
             await ctx.respond("❌ `You do not have permission to manage embeds`", ephemeral=True)
-
 
     @embed.command(name="post", description="Post an embed to the Chat")
     async def post(self, ctx: discord.ApplicationContext, name: discord.Option(str, name="name",
                                                                                description="Select an embed",
-                                                                               autocomplete=build_embed_choices) = None):
+                                                                               autocomplete=build_embed_choices)):
         """
         Post an embed to the chat.
 
@@ -256,6 +260,7 @@ class EmbedCog(commands.Cog):
             ctx (discord.ApplicationContext): The application context.
             name (str, optional): The name of the embed. Defaults to None.
         """
+
         async def show_callback(interaction: discord.Interaction):
             """
             Handle the callback when an embed is selected to be shown.
@@ -280,7 +285,7 @@ class EmbedCog(commands.Cog):
 
         if name == "" or name is None:
             view = discord.ui.View()
-            avalible_embeds = self.build_embed_choices(ctx.guild.id)
+            avalible_embeds = build_embed_choices(ctx.guild.id)
             options = []
             for embed in avalible_embeds:
                 option = discord.SelectOption(label=embed, value=embed)
@@ -316,6 +321,7 @@ class EmbedCog(commands.Cog):
             ctx (discord.ApplicationContext): The application context.
             name (str, optional): The name of the embed. Defaults to None.
         """
+
         async def delete_callback(interaction: discord.Interaction):
             """
             Handle the callback when an embed is selected to be deleted.
@@ -372,6 +378,7 @@ class EmbedCog(commands.Cog):
             ctx (discord.ApplicationContext): The application context.
             name (str): The name of the embed.
         """
+
         async def edit_callback(interaction: discord.Interaction):
             """
             Handle the callback when an embed is selected to be edited.
@@ -412,7 +419,8 @@ class EmbedCog(commands.Cog):
                                           (name, ctx.guild.id)) as cursor:
                         data = await cursor.fetchone()
                 if data:
-                    await ctx.send_modal(EditEmbedModal(embed=data[0], embed_name=name, db_location=self.bot.db_location))
+                    await ctx.send_modal(
+                        EditEmbedModal(embed=data[0], embed_name=name, db_location=self.bot.db_location))
                     return True
             await ctx.respond(f"❌ `Could not find embed with the name of {name}.`", ephemeral=True)
         else:
@@ -444,7 +452,42 @@ class EmbedCog(commands.Cog):
                         await db.execute("UPDATE embeds SET name = ? WHERE name = ? AND guild_id = ?",
                                          (new_name, name, ctx.guild.id))
                         await db.commit()
-                    await ctx.respond(f"✔ `Embed with the name of {name} has been renamed to {new_name}.`", ephemeral=True)
+                    await ctx.respond(f"✔ `Embed with the name of {name} has been renamed to {new_name}.`",
+                                      ephemeral=True)
+                    return True
+            await ctx.respond(f"❌ `Could not find embed with the name of {name}.`", ephemeral=True)
+        else:
+            await ctx.respond("❌ `You do not have permission to manage embeds`", ephemeral=True)
+
+    @embed.command(name="export", description="Export an embed to JSON")
+    @option(name="name", description="The name of the embed", required=True, autocomplete=build_embed_choices)
+    async def export(self, ctx: discord.ApplicationContext, name: str):
+        """
+        Export an embed to JSON.
+
+        Args:
+            ctx (discord.ApplicationContext): The application context.
+            name (str): The name of the embed.
+        """
+        if await utils.has_permission(ctx, "manage_embeds", self.bot.db_location):
+            if name is None or name == "":
+                await ctx.respond("❌ `No embed provided!`", ephemeral=True)
+                return
+            elif (name != "" and name is not None) and not re.match(self.name_regex, name):
+                async with aiosqlite.connect(self.bot.db_location) as db:
+                    async with db.execute("SELECT data FROM embeds WHERE name = ? AND guild_id = ?",
+                                          (name, ctx.guild.id)) as cursor:
+                        data = await cursor.fetchone()
+                if data:
+                    data = {"embeds": cjson.loads(data[0])}
+                    if len(str(data)) > 2000:
+                        # convert data to bytes using iobytes, then send as a file
+                        stream = io.BytesIO(bytes(str(data), "utf-8"))
+                        await ctx.respond("❌ `Too large to send inside discord message.`",
+                                          ephemeral=True, file=discord.File(stream,
+                                                                            filename=f"{name}_export.json"))
+                        return
+                    await ctx.respond(f"```json\n{cjson.dumps(data)}```", ephemeral=True)
                     return True
             await ctx.respond(f"❌ `Could not find embed with the name of {name}.`", ephemeral=True)
         else:
