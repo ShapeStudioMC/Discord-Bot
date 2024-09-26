@@ -42,7 +42,6 @@ def convert_permission(permissions: str | dict) -> dict | str:
             "manage_embeds": False,
             "manage_threads": False
         }
-        print(f"permissions: {permissions}")
         if permissions == "" or permissions is None:
             return perm_dict
         if "MNG_PERM" in permissions:
@@ -78,7 +77,6 @@ async def has_permission(ctx: discord.ApplicationContext, permission: str, datab
         user_id = ctx.author.id
     except AttributeError: # discord.Interaction
         user_id = ctx.user.id
-    print(f"User ID: {user_id}")
     try:
         if ctx.channel:
             users = await get_thread_assigned_users(ctx.channel)
@@ -557,7 +555,7 @@ async def safe_lock_thread(thread: discord.Thread, rename: bool = False):
                              (json.dumps(settings), thread.guild.id))
             await db.commit()
     if rename:
-        await thread.edit(name=f"🔒 {thread.name} (Locked)", locked=True)
+        await thread.edit(name=f"🔒 {thread.name} (Locked)", locked=True, archived=True)
         settings["lastRename"][str(thread.id)] = time_since_epoch()
         async with sqlite.connect(get_db_location()) as db:
             await db.execute("UPDATE guilds SET settings = ? WHERE guild_id = ?",
@@ -565,7 +563,7 @@ async def safe_lock_thread(thread: discord.Thread, rename: bool = False):
             await db.commit()
         return out
     else:
-        await thread.edit(locked=True)
+        await thread.edit(locked=True, archived=True)
         return out
 
 
@@ -591,7 +589,7 @@ async def safe_unlock_thread(thread: discord.Thread, rename: bool = False):
                              (json.dumps(settings), thread.guild.id))
             await db.commit()
     if rename:
-        await thread.edit(name=thread.name.replace("🔒 ", "").replace(" (Locked)", ""), locked=False)
+        await thread.edit(name=thread.name.replace("🔒 ", "").replace(" (Locked)", ""), locked=False, archived=False)
         settings["lastRename"][str(thread.id)] = time_since_epoch()
         async with sqlite.connect(get_db_location()) as db:
             await db.execute("UPDATE guilds SET settings = ? WHERE guild_id = ?",
@@ -599,7 +597,7 @@ async def safe_unlock_thread(thread: discord.Thread, rename: bool = False):
             await db.commit()
         return out
     else:
-        await thread.edit(locked=False)
+        await thread.edit(locked=False, archived=False)
         return out
 
 

@@ -339,7 +339,7 @@ class ThreadsCog(commands.Cog):
             message (discord.Message): The message that was sent.
         """
         if message.author == self.bot.user:
-            print("Ignoring bot message")
+            self.logger.info(f"Ignoring self message ({message.content})")
             return
 
         try:
