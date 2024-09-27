@@ -3,8 +3,6 @@ import json as cjson
 import logging
 import os
 import re
-from distutils.command.build import build
-from pydoc import describe
 from discord.ext import tasks
 import discord
 from discord import option
@@ -172,7 +170,7 @@ class EmbedCog(commands.Cog):
     @embed.command(name="import", description="Import an embed from JSON")
     @option(name="json", description="The JSON for the embed", required=True)
     @option(name="name", description="The name of the embed", required=True)
-    async def imprt(self, ctx: discord.ApplicationContext, json: str, name: str):
+    async def cmd_import(self, ctx: discord.ApplicationContext, json: str, name: str):
         """
         Import an embed from JSON.
 
@@ -208,7 +206,7 @@ class EmbedCog(commands.Cog):
 
     @embed.command(name="create", description="Create a new embed")
     @option(name="name", description="The name of the embed", required=True)
-    @option(name="embed-color", description="The color of the embed", required=False)
+    @option(name="embed-color", description="The HEX color code of the embed. (#FFFFFF)", required=False)
     @option(name="embed-title", description="The title of the embed", required=False)
     @option(name="text", description="The description of the embed", required=True)
     @option(name="embed-image", description="The image of the embed", required=False)
@@ -217,14 +215,29 @@ class EmbedCog(commands.Cog):
     @option(name="embed-fields", description="The fields of the embed", required=False)
     @option(name="embed-footer", description="The footer of the embed", required=False)
     async def create(self, ctx: discord.ApplicationContext, name: str, embed_description: str,
-                     embed_color: discord.Color = None, embed_title: str = None,
+                     embed_color: str = None, embed_title: str = None,
                      embed_image: discord.Attachment = None, embed_thumbnail: str = None,
                      embed_author: discord.User = None, embed_fields: str = None, embed_footer: str = None):
 
         if await utils.has_permission(ctx, "manage_embeds", self.bot.db_location):
             await ctx.defer()
+            if embed_color is not None:
+                print(embed_color)
+                try:
+                    if embed_color.startswith("#"):
+                        pass
+                    elif embed_color.isdigit():
+                        embed_color = discord.Color(int(embed_color))
+                    else:
+                        embed_color = discord.Color(embed_color)
+                except discord.ext.commands.errors.BadColourArgument:
+                    await ctx.respond("❌ `Invalid color provided`", ephemeral=True)
+                    return
+                except TypeError:
+                    await ctx.respond("❌ `Invalid color provided`", ephemeral=True)
+                    return
             embed = discord.Embed(title=embed_title, description=embed_description,
-                                  color=embed_color if embed_color else discord.Color.default())
+                                  color=embed_color)
             if embed_image:
                 embed.set_image(url=embed_image)
             if embed_thumbnail:
@@ -234,8 +247,9 @@ class EmbedCog(commands.Cog):
             if embed_fields:
                 fields = embed_fields.split(",")
                 for field in fields:
-                    name, value = field.split(":")
-                    embed.add_field(name=name, value=value)
+                    name, value, inline = field.split(":")
+                    embed.add_field(name=name, value=value,
+                                    inline=True if inline.lower() == "true" or inline.lower() == "t" else False)
             if embed_footer:
                 embed.set_footer(text=embed_footer)
             embeds = []

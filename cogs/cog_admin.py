@@ -1,6 +1,5 @@
 import logging
 import os
-
 import aiosqlite as sqlite
 import discord
 from discord import option
@@ -33,16 +32,6 @@ class AdminCog(commands.Cog):
         embed.add_field(name="Author", value="BEMZlabs")
         embed.add_field(name="Source", value="[GitHub](https://github.com/ShapedBuildingServer/Discord-Bot)")
         await ctx.respond(embed=embed, ephemeral=True)
-
-    @admin.command(name="force-refresh", description="Force a refresh of all notes")
-    async def force_refresh(self, ctx: discord.ApplicationContext):
-        if not await utils.has_permission(ctx, "manage_local_permissions", self.bot.db_location):
-            await ctx.respond("❌ `You do not have permission to force a refresh`", ephemeral=True)
-            return
-        async with sqlite.connect(self.bot.db_location) as db:
-            await db.execute("UPDATE users SET notes = ''")
-            await db.commit()
-        await ctx.respond("✔ `All notes have been cleared`", ephemeral=True)
 
     @permissions.command(name="show", description="Show a users permissions.")
     async def show(self, ctx: discord.ApplicationContext, member: discord.Member):

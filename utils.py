@@ -1,9 +1,7 @@
 import json
 import os
 import re
-from imp import get_tag
 from typing import Any, Dict, Coroutine
-
 import aiosqlite as sqlite
 import discord
 import datetime
