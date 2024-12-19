@@ -23,12 +23,14 @@ You should have received a copy of the GNU General Public Licence along with thi
 """
 
 import time
+from pprint import pprint
 import discord
 import dotenv
 import os
 import logging
 from discord.ext import commands
 import sqlite3
+import pymysql as sql
 import utils
 
 # ✔ ❌
@@ -76,6 +78,8 @@ discord_logger.addHandler(stream_handler)
 
 # Load environment variables from .env file
 dotenv.load_dotenv()
+
+# Get the bot token from the environment
 TOKEN = os.getenv('DISCORD_TOKEN')
 
 # Set up bot intents
@@ -90,6 +94,38 @@ for filename in os.listdir('./cogs'):
         bot.load_extension(f'cogs.{filename[:-3]}')
         logger.info(f'Loaded {filename[:-3]}')
 
+
+def process_migration(mysql_files: str) -> list:
+    out = ""
+    for line in mysql_files.split(";"):
+        if "sqlite_" in line:
+            continue
+        if "BEGIN TRANSACTION" in line:
+            continue
+        if "(" in line:
+            t = line.strip().split("(", 1)
+            out += t[0].replace('"', '`', 2)+" ("+t[1]+";\n"
+        elif "VALUES" in line:
+            t = line.strip().split("VALUES", 1)
+            out += t[0].replace('"', '`', 2)+"VALUES "+t[1]+";\n"
+        elif "DELETE FROM" in line:
+            out += line.strip().replace('"', '`', 2)+";\n"
+        else:
+            if line.strip() == "":
+                continue
+            out += line.strip()+";\n"
+    out = [" ".join(x.split())+";" for x in out.split(";\n") if x.strip() != ""]
+    for i in range(len(out)):
+        cmd = out[i]
+        if " guild_id INT" in cmd:
+            cmd = cmd.replace("guild_id INT", "guild_id BIGINT").replace("EGER", "")
+        if " user_id INT" in cmd:
+            cmd = cmd.replace("user_id INT", "user_id BIGINT").replace("EGER", "")
+        if "AUTOINCREMENT" in cmd or "autoincrement" in cmd:
+            cmd = cmd.replace("AUTOINCREMENT", "AUTO_INCREMENT").replace("autoincrement", "AUTO_INCREMENT")
+        if out[i] != cmd:
+            out[i] = cmd
+    return out
 
 @bot.event
 async def on_ready():
@@ -120,25 +156,91 @@ async def shard(ctx: discord.ApplicationContext):
 
 
 if __name__ == "__main__":
+    # Attempt to connect to the MySQL database
+    try:
+        database = sql.connect(
+            host=os.getenv('DATABASE_HOST'),
+            user=os.getenv('DATABASE_USER'),
+            password=os.getenv('DATABASE_PASSWORD'),
+            database=os.getenv('DATABASE_NAME')
+        )
+    except sql.Error as e:
+        logger.error(f"Error connecting to database: {e}")
+        raise e
+    logger.info("Connected to MySQL database")
+
+
+    if database.open and os.getenv("DATABASE_LOCATION") is not None:
+        logging.warning("SQLite database present and MySQL database connected, attempting to migrate!")
+        print(
+            "\n\n! ! !\n\nWe are connected to MySQL database, but a SQLite database is also present!\nExit now to "
+            "stop automatic migration to MySQL\n\n! ! !\n\n")
+        time.sleep(10)
+        logging.info("Creating sqlite dump")
+        with sqlite3.connect(os.getenv("DATABASE_LOCATION")) as con:
+            cur = con.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
+            tables = [table for table in cur.fetchall() if not table[0].startswith("sqlite_")]
+        with sqlite3.connect(os.getenv("DATABASE_LOCATION")) as con:
+            with open('dump.sql', 'w') as f:
+                for line in con.iterdump():
+                    f.write('%s\n' % line)
+                    print(line)
+        print("\nPlease check the dump.sql file to ensure it is correct.\nWait 15 seconds!")
+        time.sleep(15)
+        logging.info("Sending dump to MySQL database")
+        with open('dump.sql', 'r') as f:
+            lines = f.readlines()
+        lines = process_migration("".join(lines))
+        with database.cursor() as cur:
+            command = ""
+            success = 0
+            error = 0
+            for line in lines:
+                command += line
+                if ";" in line and not command.count("'") % 2:
+                    logger.debug(f"Executing: {command}")
+                    try:
+                        cur.execute(command)
+                    except sql.Error as e:
+                        logging.error(f"Error executing command: {e}")
+                        logging.error(f"Command: {command}")
+                        error += 1
+                    else:
+                        success += 1
+                    command = ""
+        database.commit()
+        logging.info(f"Migration complete! {success/(success+error)*100}% success rate!")
+        logging.info("Dump sent")
+        os.environ.pop("DATABASE_LOCATION")
+        with open('.env', "r") as f:
+            lines = f.readlines()
+        with open('.env', "w") as f:
+            for line in lines:
+                if "DATABASE_LOCATION" in line:
+                    continue
+                f.write(line)
+        logging.info("Removed DATABASE_LOCATION from .env")
+        logging.info("Migration complete")
     logging.info("Update Check")
     update = utils.check_update(logging)
     if update is not False:
         logging.warning(f"Update available! Local version: {update['local']}, Remote version: {update['remote']}")
         time.sleep(10)
-
+    else:
+        logger.info(f"You are up to date! Version: {utils.get_version()}")
     logging.info("Sanity check on the database")
-    conn = sqlite3.connect(bot.db_location)
-    c = conn.cursor()
-    c.execute("CREATE TABLE IF NOT EXISTS embeds (embed_id INTEGER PRIMARY KEY NOT NULL,"
-              "data TEXT NOT NULL, guild_id INT NOT NULL, name TEXT NOT NULL UNIQUE, settings TEXT);")
-    c.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY NOT NULL,"
-              "permissions TEXT);")
-    c.execute("CREATE TABLE IF NOT EXISTS guilds (guild_id INTEGER PRIMARY KEY NOT NULL,"
-              "settings TEXT, thread_channels TEXT);")
-    c.execute("CREATE TABLE IF NOT EXISTS threads (thread_id INTEGER PRIMARY KEY NOT NULL,"
-              "channel_id INT NOT NULL, note TEXT, note_id INTEGER, note_last_update INTEGER, "
-              "assigned_discord_ids TEXT);")
-    conn.commit()
-    conn.close()
+    with database.cursor() as c:
+        c.execute(f"CREATE TABLE IF NOT EXISTS `{os.getenv('EMBEDS_TABLE')}` ( embed_id INT not null primary key, data TEXT not null,"
+                  f" guild_id BIGINT not null, name TEXT not null unique, settings TEXT );")
+        c.execute(f"CREATE TABLE IF NOT EXISTS `{os.getenv('USERS_TABLE')}` "
+                  f"( user_id BIGINT not null primary key AUTO_INCREMENT, permissions TEXT );")
+        c.execute(f"CREATE TABLE IF NOT EXISTS `{os.getenv('GUILDS_TABLE')}` "
+                  f"( guild_id BIGINT not null primary key, settings TEXT, thread_channels TEXT );")
+        c.execute(f"CREATE TABLE IF NOT EXISTS `{os.getenv('THREADS_TABLE')}` "
+                  f"(thread_id BIGINT PRIMARY KEY NOT NULL,channel_id BIGINT NOT NULL, note TEXT, note_id BIGINT, "
+                  f"note_last_update BIGINT, assigned_discord_ids TEXT);")
+        database.commit()
+    database.close()
     logging.info("Starting bot")
     bot.run(TOKEN, reconnect=True)

@@ -7,8 +7,7 @@ from discord.ext import tasks
 import discord
 from discord import option
 from discord.ext import commands
-import sqlite3
-import aiosqlite
+import pymysql as sql
 import utils
 from cogs.cog_threads import NoteModal
 
@@ -24,35 +23,32 @@ a variable bar where you can choose between "none", "daily" or "everytime";
 
 
 class EditEmbedModal(NoteModal):
-    def __init__(self, embed, embed_name, db_location, *args, **kwargs) -> None:
+    def __init__(self, embed, embed_name, *args, **kwargs) -> None:
         """
         Initialize the EditEmbedModal.
 
         Args:
             embed (str): The embed data.
             embed_name (str): The name of the embed.
-            db_location (str): The location of the database.
             *args: Variable length argument list.
             **kwargs: Arbitrary keyword arguments.
         """
-        super().__init__(title=embed_name, note=embed, db_location=db_location, *args, **kwargs)
+        super().__init__(title=embed_name, note=embed, *args, **kwargs)
         self.embed_name = embed_name
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
         new_embed = interaction.data["components"][0]["components"][0]["value"]
-        async with aiosqlite.connect(self.db_location) as db:
-            await db.execute("UPDATE embeds SET data = ? WHERE name = ?",
-                             (new_embed, self.embed_name))
-            await db.commit()
+        utils.db_connector().execute(f"UPDATE {utils.table('embeds')} SET data = %s WHERE name = %s",
+                         (new_embed, self.embed_name))
+        utils.db_connector().commit()
         await interaction.followup.send("✔ `Embed updated!`", ephemeral=True, delete_after=5)
         return True
 
 
 class DisplayExampleEmbedView(discord.ui.View):
-    def __init__(self, db_location, user_id, *args, **kwargs):
+    def __init__(self, user_id, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.db_location = db_location
         self.original_user_id = user_id
 
     @discord.ui.button(style=discord.ButtonStyle.success, label="Yes")
@@ -64,22 +60,21 @@ class DisplayExampleEmbedView(discord.ui.View):
             button (discord.ui.Button): The button object.
             interaction (discord.Interaction): The interaction object.
         """
-        if interaction.user.id == self.original_user_id and await utils.has_permission(interaction, "manage_embeds",
-                                                                                       self.db_location):
+        if interaction.user.id == self.original_user_id and await utils.has_permission(interaction, "manage_embeds"):
             await interaction.response.defer()
-            async with aiosqlite.connect(self.db_location) as db:
-                data = interaction.message.embeds
-                json_embeds = []
-                for embed in data[:-1]:
-                    json_embeds.append(embed.to_dict())
-                try:
-                    await db.execute("INSERT INTO embeds (data, guild_id, name) VALUES (?, ?, ?)",
-                                     (cjson.dumps(json_embeds), interaction.guild.id,
-                                      data[-1].description.split("**")[1]))
-                except sqlite3.IntegrityError:
-                    await interaction.response.send_message("❌ `Embed with that name already exists`", ephemeral=True)
-                    return
-                await db.commit()
+            data = interaction.message.embeds
+            json_embeds = []
+            for embed in data[:-1]:
+                json_embeds.append(embed.to_dict())
+            try:
+                utils.db_connector().execute(f"INSERT INTO {utils.table('embeds')} (data, guild_id, name) VALUES (%s, %s, %s)",
+                                 (cjson.dumps(json_embeds), interaction.guild.id,
+                                  data[-1].description.split("**")[1]))
+            #except sqlite3.IntegrityError:
+            except sql.IntegrityError:
+                await interaction.response.send_message("❌ `Embed with that name already exists`", ephemeral=True)
+                return
+            utils.db_connector().commit()
             await interaction.delete_original_response()
             await interaction.followup.send("✔ `Embed saved successfully`", ephemeral=True)
             return True
@@ -115,10 +110,8 @@ async def build_embed_choices(ctx: discord.AutocompleteContext):
     Returns:
         list: A list of embed names.
     """
-    with sqlite3.connect(os.getenv('DATABASE_LOCATION')) as db:
-        cursor = db.cursor()
-        cursor.execute("SELECT name FROM embeds WHERE guild_id = ?;", (ctx.interaction.guild.id,))
-        embeds = cursor.fetchall()
+    utils.db_connector().execute(f"SELECT name FROM {utils.table('embeds')} WHERE guild_id = %s;", (ctx.interaction.guild.id,))
+    embeds = utils.db_connector().fetchall()
     choices = []
     for embed in embeds:
         choices.append(embed[0])
@@ -179,7 +172,7 @@ class EmbedCog(commands.Cog):
             json (str): The JSON data for the embed.
             name (str): The name of the embed.
         """
-        if await utils.has_permission(ctx, "manage_embeds", self.bot.db_location):
+        if await utils.has_permission(ctx, "manage_embeds"):
             if re.match(self.name_regex, name):
                 await ctx.respond("❌ `Invalid name. Name must contain only letters, numbers, spaces, and hyphens.`",
                                   ephemeral=True)
@@ -196,7 +189,7 @@ class EmbedCog(commands.Cog):
                     embeds.append(discord.Embed.from_dict(embed))
                 embeds.append(discord.Embed(title="Embeds", description=f"Above are the embeds you provided. Would you "
                                                                         f"like to save them under the name **{name}**?"))
-                await ctx.respond(embeds=embeds, view=DisplayExampleEmbedView(self.bot.db_location, ctx.author.id),
+                await ctx.respond(embeds=embeds, view=DisplayExampleEmbedView(ctx.author.id),
                                   ephemeral=True)
             else:
                 await ctx.respond("❌ `No JSON provided. Please use a discord embed generator or a JSON validator.`",
@@ -219,7 +212,7 @@ class EmbedCog(commands.Cog):
                      embed_image: discord.Attachment = None, embed_thumbnail: str = None,
                      embed_author: discord.User = None, embed_fields: str = None, embed_footer: str = None):
 
-        if await utils.has_permission(ctx, "manage_embeds", self.bot.db_location):
+        if await utils.has_permission(ctx, "manage_embeds"):
             await ctx.defer()
             if embed_color is not None:
                 print(embed_color)
@@ -258,7 +251,7 @@ class EmbedCog(commands.Cog):
                 embeds.append(discord.Embed.from_dict(embed))
             embeds.append(discord.Embed(title="Embeds", description=f"Above are the embeds you provided. Would you "
                                                                     f"like to save them under the name **{name}**?"))
-            await ctx.respond(embeds=embeds, view=DisplayExampleEmbedView(self.bot.db_location, ctx.author.id),
+            await ctx.respond(embeds=embeds, view=DisplayExampleEmbedView(ctx.author.id),
                               ephemeral=True)
         else:
             await ctx.respond("❌ `You do not have permission to manage embeds`", ephemeral=True)
@@ -285,10 +278,9 @@ class EmbedCog(commands.Cog):
             await interaction.response.defer()
             if interaction.user.id == ctx.author.id:
                 name = interaction.data["values"][0]
-                async with aiosqlite.connect(self.bot.db_location) as db:
-                    async with db.execute("SELECT data FROM embeds WHERE name = ? AND guild_id = ?",
-                                          (name, ctx.guild.id)) as cursor:
-                        data = await cursor.fetchone()
+                utils.db_connector().execute(f"SELECT data FROM {utils.table('embeds')} WHERE name = %s AND guild_id = %s",
+                                          (name, ctx.guild.id))
+                data = utils.db_connector().fetchone()
                 data = cjson.loads(data[0])
                 embeds = []
                 for embed in data:
@@ -312,10 +304,9 @@ class EmbedCog(commands.Cog):
             await ctx.respond(embed=embed, view=view, ephemeral=True)
             return
         elif not re.match(self.name_regex, name):
-            async with aiosqlite.connect(self.bot.db_location) as db:
-                async with db.execute("SELECT data FROM embeds WHERE name = ? AND guild_id = ?",
-                                      (name, ctx.guild.id)) as cursor:
-                    data = await cursor.fetchone()
+            utils.db_connector().execute(f"SELECT data FROM {utils.table('embeds')} WHERE name = %s AND guild_id = %s",
+                                      (name, ctx.guild.id))
+            data = utils.db_connector().fetchone()
             if data:
                 data = cjson.loads(data[0])
                 embeds = []
@@ -346,14 +337,13 @@ class EmbedCog(commands.Cog):
             await interaction.response.defer()
             if interaction.user.id == ctx.author.id:
                 name = interaction.data["values"][0]
-                async with aiosqlite.connect(self.bot.db_location) as db:
-                    await db.execute("DELETE FROM embeds WHERE name = ? AND guild_id = ?", (name, ctx.guild.id))
-                    await db.commit()
+                utils.db_connector().execute(f"DELETE FROM {utils.table('embeds')} WHERE name = %s AND guild_id = %s", (name, ctx.guild.id))
+                utils.db_connector().commit()
                 await interaction.delete_original_response()
                 await ctx.respond(f"✔ `Embed with the name of {name} has been deleted.`", ephemeral=True)
                 return True
 
-        if await utils.has_permission(ctx, "manage_embeds", self.bot.db_location):
+        if await utils.has_permission(ctx, "manage_embeds"):
             if name is None or name == "":
                 view = discord.ui.View()
                 avalible_embeds = self.build_embed_choices(ctx.guild.id)
@@ -370,14 +360,12 @@ class EmbedCog(commands.Cog):
                 await ctx.respond(embed=embed, view=view, ephemeral=True)
                 return
             elif (name != "" and name is not None) and not re.match(self.name_regex, name):
-                async with aiosqlite.connect(self.bot.db_location) as db:
-                    async with db.execute("SELECT data FROM embeds WHERE name = ? AND guild_id = ?",
-                                          (name, ctx.guild.id)) as cursor:
-                        data = await cursor.fetchone()
+                utils.db_connector().execute(f"SELECT data FROM {utils.table('embeds')} WHERE name = %s AND guild_id = %s",
+                                             (name, ctx.guild.id))
+                data = utils.db_connector().fetchone()
                 if data:
-                    async with aiosqlite.connect(self.bot.db_location) as db:
-                        await db.execute("DELETE FROM embeds WHERE name = ? AND guild_id = ?", (name, ctx.guild.id))
-                        await db.commit()
+                    utils.db_connector().execute(f"DELETE FROM {utils.table('embeds')} WHERE name = %s AND guild_id = %s", (name, ctx.guild.id))
+                    utils.db_connector().commit()
                     await ctx.respond(f"✔ `Embed with the name of {name} has been deleted.`", ephemeral=True)
                     return True
             await ctx.respond(f"❌ `Could not find embed with the name of {name}.`", ephemeral=True)
@@ -402,16 +390,15 @@ class EmbedCog(commands.Cog):
             # await interaction.response.defer()
             if interaction.user.id == ctx.author.id:
                 name = interaction.data["values"][0]
-                async with aiosqlite.connect(self.bot.db_location) as db:
-                    async with db.execute("SELECT data FROM embeds WHERE name = ? AND guild_id = ?",
-                                          (name, ctx.guild.id)) as cursor:
-                        data = await cursor.fetchone()
-                modal = EditEmbedModal(embed=data[0], embed_name=name, db_location=self.bot.db_location,
+                utils.db_connector().execute(f"SELECT data FROM {utils.table('embeds')} WHERE name = %s AND guild_id = %s",
+                                          (name, ctx.guild.id))
+                data = utils.db_connector().fetchone()
+                modal = EditEmbedModal(embed=data[0], embed_name=name,
                                        title=f"Edit embed for {utils.limit(name, 45)}")
                 await interaction.response.send_modal(modal)
                 return True
 
-        if await utils.has_permission(ctx, "manage_embeds", self.bot.db_location):
+        if await utils.has_permission(ctx, "manage_embeds"):
             if name is None or name == "":
                 view = discord.ui.View()
                 avalible_embeds = self.build_embed_choices(ctx.guild.id)
@@ -428,13 +415,12 @@ class EmbedCog(commands.Cog):
                 await ctx.respond(embed=embed, view=view, ephemeral=True)
                 return
             elif (name != "" and name is not None) and not re.match(self.name_regex, name):
-                async with aiosqlite.connect(self.bot.db_location) as db:
-                    async with db.execute("SELECT data FROM embeds WHERE name = ? AND guild_id = ?",
-                                          (name, ctx.guild.id)) as cursor:
-                        data = await cursor.fetchone()
+                utils.db_connector().execute(f"SELECT data FROM {utils.table('embeds')} WHERE name = %s AND guild_id = %s",
+                                          (name, ctx.guild.id))
+                data = utils.db_connector().fetchone()
                 if data:
                     await ctx.send_modal(
-                        EditEmbedModal(embed=data[0], embed_name=name, db_location=self.bot.db_location))
+                        EditEmbedModal(embed=data[0], embed_name=name))
                     return True
             await ctx.respond(f"❌ `Could not find embed with the name of {name}.`", ephemeral=True)
         else:
@@ -452,20 +438,18 @@ class EmbedCog(commands.Cog):
             name (str): The name of the embed.
             new_name (str): The new name of the embed.
         """
-        if await utils.has_permission(ctx, "manage_embeds", self.bot.db_location):
+        if await utils.has_permission(ctx, "manage_embeds"):
             if name is None or name == "":
                 await ctx.respond("❌ `No embed provided!`", ephemeral=True)
                 return
             elif (name != "" and name is not None) and not re.match(self.name_regex, name):
-                async with aiosqlite.connect(self.bot.db_location) as db:
-                    async with db.execute("SELECT data FROM embeds WHERE name = ? AND guild_id = ?",
-                                          (name, ctx.guild.id)) as cursor:
-                        data = await cursor.fetchone()
+                utils.db_connector().execute(f"SELECT data FROM {utils.table('embeds')} WHERE name = %s AND guild_id = %s",
+                                          (name, ctx.guild.id))
+                data = utils.db_connector().fetchone()
                 if data:
-                    async with aiosqlite.connect(self.bot.db_location) as db:
-                        await db.execute("UPDATE embeds SET name = ? WHERE name = ? AND guild_id = ?",
+                    utils.db_connector().execute(f"UPDATE {utils.table('embeds')} SET name = %s WHERE name = %s AND guild_id = %s",
                                          (new_name, name, ctx.guild.id))
-                        await db.commit()
+                    utils.db_connector().commit()
                     await ctx.respond(f"✔ `Embed with the name of {name} has been renamed to {new_name}.`",
                                       ephemeral=True)
                     return True
@@ -483,15 +467,14 @@ class EmbedCog(commands.Cog):
             ctx (discord.ApplicationContext): The application context.
             name (str): The name of the embed.
         """
-        if await utils.has_permission(ctx, "manage_embeds", self.bot.db_location):
+        if await utils.has_permission(ctx, "manage_embeds"):
             if name is None or name == "":
                 await ctx.respond("❌ `No embed provided!`", ephemeral=True)
                 return
             elif (name != "" and name is not None) and not re.match(self.name_regex, name):
-                async with aiosqlite.connect(self.bot.db_location) as db:
-                    async with db.execute("SELECT data FROM embeds WHERE name = ? AND guild_id = ?",
-                                          (name, ctx.guild.id)) as cursor:
-                        data = await cursor.fetchone()
+                utils.db_connector().execute(f"SELECT data FROM {utils.table('embeds')} WHERE name = %s AND guild_id = %s",
+                                      (name, ctx.guild.id))
+                data = utils.db_connector().fetchone()
                 if data:
                     data = {"embeds": cjson.loads(data[0])}
                     if len(str(data)) > 2000:

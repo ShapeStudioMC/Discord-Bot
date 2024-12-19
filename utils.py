@@ -1,11 +1,14 @@
 import json
+import logging
 import os
 import re
-from typing import Any, Dict, Coroutine
-import aiosqlite as sqlite
+from pprint import pprint
+
+import pymysql as sql
 import discord
 import datetime
 import dotenv
+import pymysql.err
 import requests
 
 # Load environment variables from .env
@@ -13,7 +16,7 @@ dotenv.load_dotenv()
 
 # Default settings for the bot
 DEFAULT_SETTINGS = {
-    "defaultNote": {"default": os.getenv('MASTER_NOTE')},
+    "defaultNote": {"default": os.getenv('DEFAULT_NOTE')},
     "discordTags": {},
     "lastRename": {}
 }
@@ -25,6 +28,56 @@ CODE_BLOCK_CHAR = "`"
 
 HEX_REGEX = r"^(?:[0-9a-fA-F]{3}){1,2}$"
 
+
+class SQLManager:
+    def __init__(self):
+        self.connection = sql.connect(
+            host=os.getenv('DATABASE_HOST'),
+            user=os.getenv('DATABASE_USER'),
+            password=os.getenv('DATABASE_PASSWORD'),
+            database=os.getenv('DATABASE_NAME')
+        )
+        self.cursor = self.connection.cursor()
+
+    def __enter__(self):
+        return self.cursor
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.connection.commit()
+        self.cursor.close()
+        self.connection.close()
+
+    def execute(self, *args, **kwargs):
+        print("Executing:", args)
+        try:
+            self.cursor.execute(*args, **kwargs)
+        except pymysql.err.ProgrammingError as e:
+            # if the cursor is closed, reopen it
+            pprint(e.args)
+            if "Cursor closed" in e.args[1]:
+                print("Reopening cursor")
+                self.cursor = self.connection.cursor()
+                self.cursor.execute(*args, **kwargs)
+            else:
+                raise e
+        except Exception as e:
+            raise e
+
+    def fetchone(self):
+        return self.cursor.fetchone()
+
+    def fetchall(self):
+        return self.cursor.fetchall()
+
+    def commit(self):
+        self.connection.commit()
+
+    def close(self):
+        self.cursor.close()
+        self.connection.close()
+
+# Create an instance of the SQLManager class to use for database connections
+SQLManager = SQLManager()
 
 def convert_permission(permissions: str | dict) -> dict | str:
     """
@@ -62,11 +115,10 @@ def convert_permission(permissions: str | dict) -> dict | str:
         raise TypeError("Permissions must be a string or a dictionary")
 
 
-async def has_permission(ctx: discord.ApplicationContext, permission: str, database_location: str) -> bool:
+async def has_permission(ctx: discord.ApplicationContext, permission: str) -> bool:
     """
     Check if a user has a specific permission
 
-    :param database_location: The location of the database
     :param ctx: The context of the command
     :param permission: The permission to check
     :return: True if the user has the permission, False otherwise
@@ -85,16 +137,14 @@ async def has_permission(ctx: discord.ApplicationContext, permission: str, datab
     if str(user_id) in os.getenv('BYPASS_PERMISSIONS'):
         return True
 
-    async with sqlite.connect(database_location) as db:
-        async with db.execute("SELECT permissions FROM users WHERE user_id = ?", (user_id,)) as cursor:
-            permissions = await cursor.fetchone()
+    SQLManager.execute(f"SELECT permissions FROM {table('users')} WHERE user_id = %s", (user_id,))
+    permissions = SQLManager.fetchone()
     try:
         permissions = convert_permission(permissions[0])
     except TypeError:
-        async with sqlite.connect(database_location) as db:
-            await db.execute("INSERT INTO users (user_id, permissions) VALUES (?, ?)", (user_id, ""))
-            await db.commit()
-            permissions = convert_permission("")
+        SQLManager.execute(f"INSERT INTO {table('users')} (user_id, permissions) VALUES (%s, %s)", (user_id, ""))
+        SQLManager.commit()
+        permissions = convert_permission("")
     return permissions[permission]
 
 
@@ -106,9 +156,8 @@ async def get_forum_channels(guild: discord.Guild):
     :return: A list of forum channels' ids
     """
     forum_channels = []
-    async with sqlite.connect(os.getenv('DATABASE_LOCATION')) as db:
-        async with db.execute("SELECT thread_channels FROM guilds WHERE guild_id = ?", (guild.id,)) as cursor:
-            thread_channels = await cursor.fetchone()
+    SQLManager.execute(f"SELECT thread_channels FROM {table('guilds')} WHERE guild_id = %s", (guild.id,))
+    thread_channels = SQLManager.fetchone()
     if thread_channels:
         thread_channels = thread_channels[0]
         try:
@@ -117,10 +166,9 @@ async def get_forum_channels(guild: discord.Guild):
         except ValueError:
             pass
     else:
-        async with sqlite.connect(os.getenv('DATABASE_LOCATION')) as db:
-            await db.execute("INSERT INTO guilds (guild_id, settings, thread_channels) VALUES (?, ?, ?)",
+        SQLManager.execute(f"INSERT INTO {table('guilds')} (guild_id, settings, thread_channels) VALUES (%s, %s, %s)",
                              (guild.id, "", ""))
-            await db.commit()
+        SQLManager.commit()
     return forum_channels
 
 
@@ -141,10 +189,9 @@ async def get_note(thread: discord.Thread, replace_tags: bool = True):
     :param thread: The thread to get the note for
     :return: The note for the thread
     """
-    async with sqlite.connect(os.getenv('DATABASE_LOCATION')) as db:
-        async with db.execute("SELECT note, note_last_update, note_id FROM threads WHERE thread_id = ?",
-                              (thread.id,)) as cursor:
-            note = await cursor.fetchone()
+    SQLManager.execute(f"SELECT note, note_last_update, note_id FROM {table('threads')} WHERE thread_id = %s",
+                              (thread.id,))
+    note = SQLManager.fetchone()
     if note:
         if replace_tags:
             text = await render_text(note[0], thread)
@@ -223,14 +270,23 @@ async def get_settings(guild: discord.Guild):
     :param guild: The guild to get the settings for
     :return: The settings for the guild
     """
-    async with sqlite.connect(os.getenv('DATABASE_LOCATION')) as db:
-        async with db.execute("SELECT settings FROM guilds WHERE guild_id = ?", (guild.id,)) as cursor:
-            settings = await cursor.fetchone()
-            if settings is None:
-                await db.execute("INSERT INTO guilds (guild_id, settings, thread_channels) VALUES (?, ?, ?)",
-                                 (guild.id, json.dumps(DEFAULT_SETTINGS), ""))
-                await db.commit()
-            return json.loads(settings[0]) if settings[0] != "" or settings[0] is None else DEFAULT_SETTINGS
+    SQLManager.execute(f"SELECT settings FROM {table('guilds')} WHERE guild_id = %s", (guild.id,))
+    settings = SQLManager.fetchone()
+    if settings is None:
+        SQLManager.execute(f"INSERT INTO {table('guilds')} (guild_id, settings, thread_channels) VALUES (%s, %s, %s)",
+                         (guild.id, json.dumps(DEFAULT_SETTINGS), ""))
+        SQLManager.commit()
+    # attempt to load the json.
+    try:
+        obj_settings = json.loads(settings[0])
+    except json.JSONDecodeError:
+        print("Corrupt settings found for guild, creating new settings.")
+        print(settings[0])
+        SQLManager.execute(f"UPDATE {table('guilds')} SET settings = %s WHERE guild_id = %s",
+                         (json.dumps(DEFAULT_SETTINGS), guild.id))
+        SQLManager.commit()
+        return DEFAULT_SETTINGS
+    return obj_settings if settings[0] != "" or settings[0] is None else DEFAULT_SETTINGS
 
 
 def limit(string: str, limit: int):
@@ -244,15 +300,6 @@ def limit(string: str, limit: int):
     if len(string) > limit:
         return string[:limit - 3] + "..."
     return string
-
-
-def get_db_location():
-    """
-    Get the database location from environment variables
-
-    :return: The database location
-    """
-    return os.getenv('DATABASE_LOCATION')
 
 
 async def render_text(text: str, thread: discord.Thread):
@@ -365,9 +412,8 @@ async def get_note_message(thread: discord.Thread):
     :return: discord.Message
     """
     # call the database to find the note message ID
-    async with sqlite.connect(os.getenv('DATABASE_LOCATION')) as db:
-        async with db.execute("SELECT note_id FROM threads WHERE thread_id = ?", (thread.id,)) as cursor:
-            note_message_id = await cursor.fetchone()
+    SQLManager.execute(f"SELECT note_id FROM {table('threads')} WHERE thread_id = %s", (thread.id,))
+    note_message_id = SQLManager.fetchone()
     if note_message_id:
         note_message_id = note_message_id[0]
         note_message = await thread.fetch_message(note_message_id)
@@ -411,17 +457,15 @@ async def get_thread_assigned_users(thread: discord.Thread):
     :param thread: The thread to get the assigned users for
     :return list: The assigned users
     """
-    async with sqlite.connect(os.getenv('DATABASE_LOCATION')) as db:
-        async with db.execute("SELECT assigned_discord_ids FROM threads WHERE thread_id = ?", (thread.id,)) as cursor:
-            assigned_users = await cursor.fetchone()
+    SQLManager.execute(f"SELECT assigned_discord_ids FROM {table('threads')} WHERE thread_id = %s", (thread.id,))
+    assigned_users = SQLManager.fetchone()
     if assigned_users:
         try:
             return json.loads(assigned_users[0])
         except TypeError:
-            async with sqlite.connect(os.getenv('DATABASE_LOCATION')) as db:
-                await db.execute("UPDATE threads SET assigned_discord_ids = ? WHERE thread_id = ?",
+            SQLManager.execute(f"UPDATE {table('threads')} SET assigned_discord_ids = %s WHERE thread_id = %s",
                                  (json.dumps([]), thread.id))
-                await db.commit()
+            SQLManager.commit()
             return []
     return []
 
@@ -433,10 +477,9 @@ async def store_thread_assigned_users(thread: discord.Thread, assigned_users: li
     :param thread: The thread to store the assigned users for
     :param assigned_users: The users to store
     """
-    async with sqlite.connect(os.getenv('DATABASE_LOCATION')) as db:
-        await db.execute("UPDATE threads SET assigned_discord_ids = ? WHERE thread_id = ?",
+    SQLManager.execute(f"UPDATE {table('threads')} SET assigned_discord_ids = %s WHERE thread_id = %s",
                          (json.dumps(assigned_users), thread.id))
-        await db.commit()
+    SQLManager.commit()
     return
 
 
@@ -548,17 +591,15 @@ async def safe_lock_thread(thread: discord.Thread, rename: bool = False):
             rename = False
     else:
         settings["lastRename"][str(thread.id)] = time_since_epoch()
-        async with sqlite.connect(get_db_location()) as db:
-            await db.execute("UPDATE guilds SET settings = ? WHERE guild_id = ?",
+        SQLManager.execute(f"UPDATE {table('guilds')} SET settings = %s WHERE guild_id = %s",
                              (json.dumps(settings), thread.guild.id))
-            await db.commit()
+        SQLManager.commit()
     if rename:
         await thread.edit(name=f"🔒 {thread.name} (Locked)", locked=True, archived=True)
         settings["lastRename"][str(thread.id)] = time_since_epoch()
-        async with sqlite.connect(get_db_location()) as db:
-            await db.execute("UPDATE guilds SET settings = ? WHERE guild_id = ?",
+        SQLManager.execute(f"UPDATE {table('guilds')} SET settings = %s WHERE guild_id = %s",
                              (json.dumps(settings), thread.guild.id))
-            await db.commit()
+        SQLManager.commit()
         return out
     else:
         await thread.edit(locked=True, archived=True)
@@ -582,17 +623,15 @@ async def safe_unlock_thread(thread: discord.Thread, rename: bool = False):
                 rename = False
     else:
         settings["lastRename"][str(thread.id)] = time_since_epoch()
-        async with sqlite.connect(get_db_location()) as db:
-            await db.execute("UPDATE guilds SET settings = ? WHERE guild_id = ?",
+        SQLManager.execute(f"UPDATE {table('guilds')} SET settings = %s WHERE guild_id = %s",
                              (json.dumps(settings), thread.guild.id))
-            await db.commit()
+        SQLManager.commit()
     if rename:
         await thread.edit(name=thread.name.replace("🔒 ", "").replace(" (Locked)", ""), locked=False, archived=False)
         settings["lastRename"][str(thread.id)] = time_since_epoch()
-        async with sqlite.connect(get_db_location()) as db:
-            await db.execute("UPDATE guilds SET settings = ? WHERE guild_id = ?",
-                             (json.dumps(settings), thread.guild.id))
-            await db.commit()
+        SQLManager.execute(f"UPDATE {table('guilds')} SET settings = %s WHERE guild_id = %s",
+                           (json.dumps(settings), thread.guild.id))
+        SQLManager.commit()
         return out
     else:
         await thread.edit(locked=False, archived=False)
@@ -609,7 +648,33 @@ async def can_rename(thread):
     settings = await get_settings(thread.guild)
     if str(thread.id) in settings["lastRename"]:
         if time_since_epoch() - int(settings["lastRename"][str(thread.id)]) < 300:
-            # return False and when the time when the thread can be renamed again
             return False, 300 - (time_since_epoch() - int(settings["lastRename"][str(thread.id)]))
     return True, -1
 
+# with db_connector() as db:
+def db_connector():
+    """
+    Get a database connection
+
+    :return: A database connection
+    """
+    return SQLManager
+
+def table(t: str):
+    """
+    Get the table name for a certain type
+
+    :param t: The type of table to get
+    :return: The table name
+    """
+    t = t.lower()
+    if t == "users":
+        return os.getenv("USERS_TABLE") if os.getenv("USERS_TABLE") else "users"
+    elif t == "guilds":
+        return os.getenv("GUILDS_TABLE") if os.getenv("GUILDS_TABLE") else "guilds"
+    elif t == "threads":
+        return os.getenv("THREADS_TABLE") if os.getenv("THREADS_TABLE") else "threads"
+    elif t == "embeds":
+        return os.getenv("EMBEDS_TABLE") if os.getenv("EMBEDS_TABLE") else "embeds"
+    else:
+        raise ValueError("Invalid type")

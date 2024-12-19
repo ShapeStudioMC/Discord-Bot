@@ -1,6 +1,6 @@
 import logging
 import os
-import aiosqlite as sqlite
+import pymysql as sql
 import discord
 from discord import option
 from discord.ext import commands
@@ -33,20 +33,29 @@ class AdminCog(commands.Cog):
         embed.add_field(name="Source", value="[GitHub](https://github.com/ShapedBuildingServer/Discord-Bot)")
         await ctx.respond(embed=embed, ephemeral=True)
 
+    #@admin.command(name="force-refresh", description="Force a refresh of all notes")
+    #async def force_refresh(self, ctx: discord.ApplicationContext):
+    #    if not await utils.has_permission(ctx, "manage_local_permissions"):
+    #        await ctx.respond("❌ `You do not have permission to force a refresh`", ephemeral=True)
+    #        return
+    #    # todo: what the hell is this doing?
+    #    utils.db_connector().execute("UPDATE users SET notes = ''")
+    #    utils.db_connector().commit()
+    #    await ctx.respond("✔ `All notes have been cleared`", ephemeral=True)
+
     @permissions.command(name="show", description="Show a users permissions.")
     async def show(self, ctx: discord.ApplicationContext, member: discord.Member):
-        if not await utils.has_permission(ctx, "manage_local_permissions", self.bot.db_location):
+        if not await utils.has_permission(ctx, "manage_local_permissions"):
             await ctx.respond("❌ `You do not have permission to show local permissions`", ephemeral=True)
             return
         else:
             user_id = member.id if member else ctx.author.id
-            async with sqlite.connect(self.bot.db_location) as db:
-                async with db.execute("SELECT permissions FROM users WHERE user_id = ?", (user_id,)) as cursor:
-                    permissions = await cursor.fetchone()
-                    if not permissions:
-                        await db.execute("INSERT INTO users (user_id, permissions) VALUES (?, ?)", (member.id, ""))
-                        await db.commit()
-                        permissions = await cursor.fetchone()
+            utils.db_connector().execute(f"SELECT permissions FROM {utils.table('users')} WHERE user_id = %s", (user_id,))
+            permissions = utils.db_connector().fetchone()
+            if not permissions:
+                utils.db_connector().execute(f"INSERT INTO {utils.table('users')} (user_id, permissions) VALUES (%s, %s)", (member.id, ""))
+                utils.db_connector().commit()
+                permissions = utils.db_connector().fetchone()
             permissions = utils.convert_permission(permissions[0] if permissions else "")
             embed = discord.Embed(title="Permissions")
             for key, value in permissions.items():
@@ -60,22 +69,20 @@ class AdminCog(commands.Cog):
     @option(name="permission", description="The permission you want to grant/revoke", required=True,
             choices=["manage_local_permissions", "manage_embeds", "manage_threads"])
     async def modify(self, ctx: discord.ApplicationContext, member: discord.Member, permission: str):
-        if await utils.has_permission(ctx, "manage_local_permissions", self.bot.db_location):
-            async with sqlite.connect(self.bot.db_location) as db:
-                async with db.execute("SELECT permissions FROM users WHERE user_id = ?", (member.id,)) as cursor:
-                    permissions = await cursor.fetchone()
-                    if not permissions:
-                        await db.execute("INSERT INTO users (user_id, permissions) VALUES (?, ?)", (member.id, ""))
-                        await db.commit()
-                        permissions = await cursor.fetchone()
+        if await utils.has_permission(ctx, "manage_local_permissions"):
+            utils.db_connector().execute(f"SELECT permissions FROM {utils.table('users')} WHERE user_id = %s", (member.id,))
+            permissions = utils.db_connector().fetchone()
+            if not permissions:
+                utils.db_connector().execute(f"INSERT INTO {utils.table('users')} (user_id, permissions) VALUES (%s, %s)", (member.id, ""))
+                utils.db_connector().commit()
+                permissions = utils.db_connector().fetchone()
             permissions = utils.convert_permission(permissions[0] if permissions else "")
             if permission in permissions:
                 permissions[permission] = not permissions[permission]
                 print_perm = 'True' if permissions[permission] else 'False'
                 permissions = utils.convert_permission(permissions)
-                async with sqlite.connect(self.bot.db_location) as db:
-                    await db.execute("UPDATE users SET permissions = ? WHERE user_id = ?", (permissions, member.id))
-                    await db.commit()
+                utils.db_connector().execute(f"UPDATE {utils.table('users')} SET permissions = %s WHERE user_id = %s", (permissions, member.id))
+                utils.db_connector().commit()
                 await ctx.respond(f"✔ `Set {permission} for {member.display_name} to {print_perm}`", ephemeral=True)
             else:
                 await ctx.respond(f"❌ `Invalid permission: {permission}`", ephemeral=True)
@@ -84,7 +91,7 @@ class AdminCog(commands.Cog):
 
     @forum.command(name="remove", description="Remove a forum channel")
     async def remove(self, ctx: discord.ApplicationContext, channel: discord.ForumChannel):
-        if not await utils.has_permission(ctx, "manage_threads", self.bot.db_location):
+        if not await utils.has_permission(ctx, "manage_threads"):
             await ctx.respond("❌ `You do not have permission to manage threads`", ephemeral=True)
             return
         forum_channels = await utils.get_forum_channels(ctx.guild)
@@ -92,10 +99,9 @@ class AdminCog(commands.Cog):
             await ctx.respond("❌ `This channel is not set up as a forum channel`", ephemeral=True)
             return
         forum_channels.remove(ctx.channel.id)
-        async with sqlite.connect(self.bot.db_location) as db:
-            await db.execute("UPDATE guilds SET thread_channels = ? WHERE guild_id = ?",
-                             (",".join([str(channel) for channel in forum_channels]), ctx.guild.id))
-            await db.commit()
+        utils.db_connector().execute(f"UPDATE {utils.table('guilds')} SET thread_channels = %s WHERE guild_id = %s",
+                                     (",".join([str(channel) for channel in forum_channels]), ctx.guild.id))
+        utils.db_connector().commit()
         await ctx.respond(f"✔ `Channel {channel.name} has been removed as a forum channel`", ephemeral=True)
 
     @commands.Cog.listener()
