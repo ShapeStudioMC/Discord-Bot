@@ -231,7 +231,7 @@ if __name__ == "__main__":
         logger.info(f"You are up to date! Version: {utils.get_version()}")
     logging.info("Sanity check on the database")
     with database.cursor() as c:
-        c.execute(f"CREATE TABLE IF NOT EXISTS `{os.getenv('EMBEDS_TABLE')}` ( embed_id INT not null primary key, data TEXT not null,"
+        c.execute(f"CREATE TABLE IF NOT EXISTS `{os.getenv('EMBEDS_TABLE')}` ( embed_id INT not null primary key AUTO_INCREMENT, data TEXT not null,"
                   f" guild_id BIGINT not null, name TEXT not null unique, settings TEXT );")
         c.execute(f"CREATE TABLE IF NOT EXISTS `{os.getenv('USERS_TABLE')}` "
                   f"( user_id BIGINT not null primary key AUTO_INCREMENT, permissions TEXT );")

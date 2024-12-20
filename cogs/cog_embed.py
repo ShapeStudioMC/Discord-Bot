@@ -3,6 +3,8 @@ import json as cjson
 import logging
 import os
 import re
+from pprint import pprint
+
 from discord.ext import tasks
 import discord
 from discord import option
@@ -10,6 +12,7 @@ from discord.ext import commands
 import pymysql as sql
 import utils
 from cogs.cog_threads import NoteModal
+from utils import convert_permission
 
 """
 a boolean variable setting an edit button or not (so having an option implemented to have the edit button for easier usage)
@@ -94,10 +97,13 @@ class DisplayExampleEmbedView(discord.ui.View):
             interaction (discord.Interaction): The interaction object.
         """
         if interaction.user.id == self.original_user_id:
-            await interaction.message.delete()
-            await interaction.respond("❌ `Embed not saved`", ephemeral=True, delete_after=5)
+            try:
+                await interaction.message.delete()
+            except discord.NotFound:
+                pass
+            await interaction.response.send_message("❌ `Embed not saved`", ephemeral=True, delete_after=5)
         else:
-            await interaction.respond("❌ `You do not have permission to respond (Not command author)`", ephemeral=True)
+            await interaction.response.send_message("❌ `You do not have permission to respond (Not command author)`", ephemeral=True)
 
 
 async def build_embed_choices(ctx: discord.AutocompleteContext):
@@ -185,6 +191,12 @@ class EmbedCog(commands.Cog):
                                       "JSON validator.`", ephemeral=True)
                     return
                 embeds = []
+                try:
+                    embed_json["embeds"]
+                except KeyError:
+                    await ctx.respond("❌ `Invalid JSON provided. Please use a discord embed generator or a JSON validator.`",
+                                      ephemeral=True)
+                    return
                 for embed in embed_json["embeds"]:
                     embeds.append(discord.Embed.from_dict(embed))
                 embeds.append(discord.Embed(title="Embeds", description=f"Above are the embeds you provided. Would you "
