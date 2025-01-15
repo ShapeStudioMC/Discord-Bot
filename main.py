@@ -1,4 +1,4 @@
-# VERSION: 0.0.5
+# VERSION: 0.0.6
 # THIS IS FOR UPDATE CHECKING, DO NOT REMOVE
 
 """
@@ -231,7 +231,8 @@ if __name__ == "__main__":
         logger.info(f"You are up to date! Version: {utils.get_version()}")
     logging.info("Sanity check on the database")
     with database.cursor() as c:
-        c.execute(f"CREATE TABLE IF NOT EXISTS `{os.getenv('EMBEDS_TABLE')}` ( embed_id INT not null primary key AUTO_INCREMENT, data TEXT not null,"
+        c.execute(f"CREATE TABLE IF NOT EXISTS `{os.getenv('EMBEDS_TABLE')}` ( embed_id INT not null primary key "
+                  f"AUTO_INCREMENT, data TEXT not null,"
                   f" guild_id BIGINT not null, name TEXT not null unique, settings TEXT );")
         c.execute(f"CREATE TABLE IF NOT EXISTS `{os.getenv('USERS_TABLE')}` "
                   f"( user_id BIGINT not null primary key AUTO_INCREMENT, permissions TEXT );")
@@ -240,6 +241,10 @@ if __name__ == "__main__":
         c.execute(f"CREATE TABLE IF NOT EXISTS `{os.getenv('THREADS_TABLE')}` "
                   f"(thread_id BIGINT PRIMARY KEY NOT NULL,channel_id BIGINT NOT NULL, note TEXT, note_id BIGINT, "
                   f"note_last_update BIGINT, assigned_discord_ids TEXT);")
+        c.execute(f"CREATE TABLE IF NOT EXISTS `discord_user_roles`(userID BIGINT not null,"
+                  f"guildID BIGINT not null,"
+                  f"DiscordRoles LONGTEXT  not null, "
+                  f"LastUpdate TIMESTAMP not null);")
         database.commit()
     database.close()
     logging.info("Starting bot")

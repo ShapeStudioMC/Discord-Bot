@@ -76,8 +76,10 @@ class SQLManager:
         self.cursor.close()
         self.connection.close()
 
+
 # Create an instance of the SQLManager class to use for database connections
 SQLManager = SQLManager()
+
 
 def convert_permission(permissions: str | dict) -> dict | str:
     """
@@ -123,9 +125,9 @@ async def has_permission(ctx: discord.ApplicationContext, permission: str) -> bo
     :param permission: The permission to check
     :return: True if the user has the permission, False otherwise
     """
-    try: # discord.ApplicationContext
+    try:  # discord.ApplicationContext
         user_id = ctx.author.id
-    except AttributeError: # discord.Interaction
+    except AttributeError:  # discord.Interaction
         user_id = ctx.user.id
     try:
         if ctx.channel:
@@ -167,7 +169,7 @@ async def get_forum_channels(guild: discord.Guild):
             pass
     else:
         SQLManager.execute(f"INSERT INTO {table('guilds')} (guild_id, settings, thread_channels) VALUES (%s, %s, %s)",
-                             (guild.id, "", ""))
+                           (guild.id, "", ""))
         SQLManager.commit()
     return forum_channels
 
@@ -190,7 +192,7 @@ async def get_note(thread: discord.Thread, replace_tags: bool = True):
     :return: The note for the thread
     """
     SQLManager.execute(f"SELECT note, note_last_update, note_id FROM {table('threads')} WHERE thread_id = %s",
-                              (thread.id,))
+                       (thread.id,))
     note = SQLManager.fetchone()
     if note:
         if replace_tags:
@@ -274,7 +276,7 @@ async def get_settings(guild: discord.Guild):
     settings = SQLManager.fetchone()
     if settings is None:
         SQLManager.execute(f"INSERT INTO {table('guilds')} (guild_id, settings, thread_channels) VALUES (%s, %s, %s)",
-                         (guild.id, json.dumps(DEFAULT_SETTINGS), ""))
+                           (guild.id, json.dumps(DEFAULT_SETTINGS), ""))
         SQLManager.commit()
     # attempt to load the json.
     try:
@@ -283,7 +285,7 @@ async def get_settings(guild: discord.Guild):
         print("Corrupt settings found for guild, creating new settings.")
         print(settings[0])
         SQLManager.execute(f"UPDATE {table('guilds')} SET settings = %s WHERE guild_id = %s",
-                         (json.dumps(DEFAULT_SETTINGS), guild.id))
+                           (json.dumps(DEFAULT_SETTINGS), guild.id))
         SQLManager.commit()
         return DEFAULT_SETTINGS
     return obj_settings if settings[0] != "" or settings[0] is None else DEFAULT_SETTINGS
@@ -464,7 +466,7 @@ async def get_thread_assigned_users(thread: discord.Thread):
             return json.loads(assigned_users[0])
         except TypeError:
             SQLManager.execute(f"UPDATE {table('threads')} SET assigned_discord_ids = %s WHERE thread_id = %s",
-                                 (json.dumps([]), thread.id))
+                               (json.dumps([]), thread.id))
             SQLManager.commit()
             return []
     return []
@@ -478,7 +480,7 @@ async def store_thread_assigned_users(thread: discord.Thread, assigned_users: li
     :param assigned_users: The users to store
     """
     SQLManager.execute(f"UPDATE {table('threads')} SET assigned_discord_ids = %s WHERE thread_id = %s",
-                         (json.dumps(assigned_users), thread.id))
+                       (json.dumps(assigned_users), thread.id))
     SQLManager.commit()
     return
 
@@ -592,13 +594,13 @@ async def safe_lock_thread(thread: discord.Thread, rename: bool = False):
     else:
         settings["lastRename"][str(thread.id)] = time_since_epoch()
         SQLManager.execute(f"UPDATE {table('guilds')} SET settings = %s WHERE guild_id = %s",
-                             (json.dumps(settings), thread.guild.id))
+                           (json.dumps(settings), thread.guild.id))
         SQLManager.commit()
     if rename:
         await thread.edit(name=f"🔒 {thread.name} (Locked)", locked=True, archived=True)
         settings["lastRename"][str(thread.id)] = time_since_epoch()
         SQLManager.execute(f"UPDATE {table('guilds')} SET settings = %s WHERE guild_id = %s",
-                             (json.dumps(settings), thread.guild.id))
+                           (json.dumps(settings), thread.guild.id))
         SQLManager.commit()
         return out
     else:
@@ -619,12 +621,12 @@ async def safe_unlock_thread(thread: discord.Thread, rename: bool = False):
     # check if thread was last renamed more than 5 minutes ago
     if str(thread.id) in settings["lastRename"].keys():
         if time_since_epoch() - int(settings["lastRename"][str(thread.id)]) < 300:
-                out = f"cooldown:{time_since_epoch() - settings['lastRename'][str(thread.id)]}"
-                rename = False
+            out = f"cooldown:{time_since_epoch() - settings['lastRename'][str(thread.id)]}"
+            rename = False
     else:
         settings["lastRename"][str(thread.id)] = time_since_epoch()
         SQLManager.execute(f"UPDATE {table('guilds')} SET settings = %s WHERE guild_id = %s",
-                             (json.dumps(settings), thread.guild.id))
+                           (json.dumps(settings), thread.guild.id))
         SQLManager.commit()
     if rename:
         await thread.edit(name=thread.name.replace("🔒 ", "").replace(" (Locked)", ""), locked=False, archived=False)
@@ -651,6 +653,7 @@ async def can_rename(thread):
             return False, 300 - (time_since_epoch() - int(settings["lastRename"][str(thread.id)]))
     return True, -1
 
+
 # with db_connector() as db:
 def db_connector():
     """
@@ -659,6 +662,7 @@ def db_connector():
     :return: A database connection
     """
     return SQLManager
+
 
 def table(t: str):
     """
@@ -678,3 +682,78 @@ def table(t: str):
         return os.getenv("EMBEDS_TABLE") if os.getenv("EMBEDS_TABLE") else "embeds"
     else:
         raise ValueError("Invalid type")
+
+
+def to_json(data: dict | list):
+    """
+    Convert a dictionary to JSON
+
+    :param data: The dictionary to convert
+    :return: The JSON representation of the dictionary
+    """
+    return json.dumps(data)
+
+
+def from_json(data: str):
+    """
+    Convert a JSON string to a dictionary
+
+    :param data: The JSON string to convert
+    :return: The dictionary representation of the JSON string
+    """
+    return json.loads(data)
+
+
+def convert_to_dict(cls: object):
+    """
+    Convert an object to a dictionary
+
+    :param cls: The object to convert
+    :return: The dictionary representation of the object
+    """
+    return cls.__dict__
+
+
+def get_bot_info(bot: discord.bot):
+    """
+    Return dictionary of bot information
+
+    :param bot: The bot to get information for
+    :return: Dictionary of bot information
+    """
+    return {
+        "user": bot.user,
+        "guilds": len(bot.guilds),
+        "shards": bot.shard_count,
+        "shard_id": bot.shard_id,
+        "shard_info": bot.get_shard(bot.shard_id)
+    }
+
+
+def sort_guilds(bot: discord.bot):
+    """
+    Sort the guilds by date of joining, with the oldest guilds first. If DEFAULT_GUILD is set, it will be first.
+
+    :param bot: The bot to sort the guilds for
+    :return: The sorted guilds
+    """
+    guilds = bot.guilds
+    guilds.sort(key=lambda x: x.me.joined_at)
+    if os.getenv("DEFAULT_GUILD"):
+        guilds.insert(0, bot.get_guild(int(os.getenv("DEFAULT_GUILD"))))
+    guilds = list(dict.fromkeys(guilds))
+    return guilds
+
+
+async def process_job(job: dict, bot: discord.bot):
+    """
+    Main subrutine for processing job
+
+    :param job: The job to process
+    :param bot: The bot to use
+    :return bool: True if the job was processed successfully, False otherwise
+    """
+    pprint(job)
+    if job["endpoint"] == "update-user-roles":
+        ...  # todo: implement
+    return False
