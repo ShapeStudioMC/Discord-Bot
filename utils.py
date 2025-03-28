@@ -48,14 +48,13 @@ class SQLManager:
         self.connection.close()
 
     def execute(self, *args, **kwargs):
-        print("Executing:", args)
         try:
             self.cursor.execute(*args, **kwargs)
         except pymysql.err.ProgrammingError as e:
             # if the cursor is closed, reopen it
             pprint(e.args)
             if "Cursor closed" in e.args[1]:
-                print("Reopening cursor")
+                print("Cursor closed! Attempting to reopen cursor.")
                 self.cursor = self.connection.cursor()
                 self.cursor.execute(*args, **kwargs)
             else:
