@@ -139,18 +139,18 @@ class WebConnectorCog(commands.Cog):
                     t_roles.append(self.role_convert(role))
                 if not t_roles:
                     t_roles = []
-                utils.db_connector().execute("SELECT * FROM discord_user_roles WHERE userID = %s AND guildID = %s;",
+                utils.db_connector().execute(f"SELECT * FROM `{os.getenv('ROLE_TABLE')}` WHERE userID = %s AND guildID = %s;",
                                              (user, cacheGuildID))
                 db_roles = utils.db_connector().fetchall()
                 if not db_roles:
-                    utils.db_connector().execute("INSERT INTO discord_user_roles (userID, guildID, DiscordRoles, "
-                                                 "LastUpdate) VALUES (%s, %s, %s, %s);",
+                    utils.db_connector().execute(f"INSERT INTO `{os.getenv('ROLE_TABLE')}` (userID, guildID, DiscordRoles, "
+                                                 f"LastUpdate) VALUES (%s, %s, %s, %s);",
                                                  (user, cacheGuildID, utils.to_json(t_roles), datetime.now()))
                     utils.db_connector().commit()
                 else:
                     if db_roles[0][2] != t_roles:
-                        utils.db_connector().execute("UPDATE discord_user_roles SET DiscordRoles = %s, LastUpdate "
-                                                     "= %s WHERE userID = %s AND guildID = %s;",
+                        utils.db_connector().execute(f"UPDATE `{os.getenv('ROLE_TABLE')}` SET DiscordRoles = %s, LastUpdate "
+                                                     f"= %s WHERE userID = %s AND guildID = %s;",
                                                      (utils.to_json(t_roles), datetime.now(), user, cacheGuildID))
                         utils.db_connector().commit()
         self.logger.info(f"Cache synced at {datetime.now()}")

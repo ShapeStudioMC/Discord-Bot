@@ -84,7 +84,10 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 
 # Set up bot intents
 intents = discord.Intents.default().all()
-bot = commands.AutoShardedBot(intents=intents, debug_guilds=[1242097337837289472,])
+if os.getenv("DEBUG_GUILDS"):
+    bot = commands.AutoShardedBot(intents=intents, debug_guilds=[int(x) for x in os.getenv("DEBUG_GUILDS").split(",")])
+else:
+    bot = commands.AutoShardedBot(intents=intents)
 bot.logger = logger
 bot.db_location = os.getenv('DATABASE_LOCATION')
 
@@ -169,7 +172,6 @@ if __name__ == "__main__":
         raise e
     logger.info("Connected to MySQL database")
 
-
     if database.open and os.getenv("DATABASE_LOCATION") is not None:
         logging.warning("SQLite database present and MySQL database connected, attempting to migrate!")
         print(
@@ -241,7 +243,7 @@ if __name__ == "__main__":
         c.execute(f"CREATE TABLE IF NOT EXISTS `{os.getenv('THREADS_TABLE')}` "
                   f"(thread_id BIGINT PRIMARY KEY NOT NULL,channel_id BIGINT NOT NULL, note TEXT, note_id BIGINT, "
                   f"note_last_update BIGINT, assigned_discord_ids TEXT);")
-        c.execute(f"CREATE TABLE IF NOT EXISTS `discord_user_roles`(userID BIGINT not null,"
+        c.execute(f"CREATE TABLE IF NOT EXISTS `{os.getenv('ROLE_TABLE')}`(userID BIGINT not null,"
                   f"guildID BIGINT not null,"
                   f"DiscordRoles LONGTEXT  not null, "
                   f"LastUpdate TIMESTAMP not null);")
