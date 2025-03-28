@@ -745,15 +745,37 @@ def sort_guilds(bot: discord.bot):
     return guilds
 
 
-async def process_job(job: dict, bot: discord.bot):
+async def process_job(job: dict, bot: discord.bot, logger):
     """
-    Main subrutine for processing job
+    Main subrutine for processing jobs
 
     :param job: The job to process
     :param bot: The bot to use
     :return bool: True if the job was processed successfully, False otherwise
     """
-    pprint(job)
-    if job["endpoint"] == "update-user-roles":
-        ...  # todo: implement
-    return False
+    logger.debug(f"Start processing job: {job}")
+    try:
+        if job["endpoint"] == "update-user-roles":
+            guilds = sort_guilds(bot)
+            user = job["data"]["discord_username"]
+            new_roles = job["data"]["new_roles"]
+            for guild in guilds:
+                if guild.get_member_named(user):
+                    member = guild.get_member_named(user)
+                    for role in new_roles:
+                        role = discord.utils.get(guild.roles, name=role)
+                        if role:
+                            await member.add_roles(role, reason=f"Received job - update roles")
+                            logger.info(f"Added role {role.name} to {member.name} in {guild.name}")
+                        else:
+                            logger.warning(f"Role {role} not found in {guild.name}")
+                    return True
+                else:
+                    logger.warning(f"User {user} not found in {guild.name}")
+        if job["endpoint"] == "NEXT_JOB":
+            ...
+    except Exception as e:
+        logger.error(f"Error processing job: {e}")
+        return False
+    finally:
+        logger.debug(f"Finished processing job")

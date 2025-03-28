@@ -80,7 +80,12 @@ class WebConnectorCog(commands.Cog):
         if before.roles != after.roles:  # If roles have changed
             self.logger.info(f"{before} roles changed from {before.roles} to {after.roles}")
             # update cache
-            self.cache[after.guild.id]["users"][after.id]["roles"] = [role.id for role in after.roles]
+            try:
+                self.cache[after.guild.id]["users"][after.id]["roles"] = [role.id for role in after.roles]
+            except KeyError:
+                self.logger.warning(f"KeyError: {after.guild.id} not in cache, building cache")
+                await self.build_cache()
+                self.cache[after.guild.id]["users"][after.id]["roles"] = [role.id for role in after.roles]
         # if username changed
         if before.name != after.name:
             self.logger.info(f"{before} username changed from {before.name} to {after.name}")
@@ -93,7 +98,6 @@ class WebConnectorCog(commands.Cog):
     @commands.Cog.listener()
     async def on_guild_update(self, before, after):
         print("guild updated")
-        pprint(after.to_dict())
         if before.roles != after.roles:
             self.logger.info(f"{before} roles changed from {before.roles} to {after.roles}")
             settings = await utils.get_settings(after)
@@ -101,16 +105,17 @@ class WebConnectorCog(commands.Cog):
 
     @tasks.loop(seconds=int(utils.get_config("JOB_INTERVAL")))
     async def check_jobs(self):
-        utils.db_connector().execute("SELECT * FROM jobs WHERE jobs.process_id = %s AND jobs.status = %s;",
-                                     (utils.get_config("JOB_BOT_NAME"), "pending"))
-        jobs = utils.db_connector().fetchall()
-        # sort by created_at
+        db = utils.db_connector()
+        db.execute("SELECT * FROM jobs WHERE jobs.process_id = %s AND jobs.status = %s;",
+                   (utils.get_config("JOB_BOT_NAME"), "pending"))
+        db.commit()  # Ensure the SELECT statement is committed
+        jobs = db.fetchall()
         jobs = sorted(jobs, key=lambda x: (x[4], x[5]))
         if len(jobs) > 0:
             await self.bot.wait_until_ready()
             for job in jobs:
                 self.logger.info(f"Processing job id {job[0]}")
-                status = await utils.process_job(utils.from_json(job[2]), self.bot)
+                status = await utils.process_job(utils.from_json(job[2]), self.bot, self.logger)
                 if status:
                     utils.db_connector().execute("UPDATE jobs SET status = %s WHERE id = %s;", ("completed", job[0]))
                     utils.db_connector().commit()
@@ -127,7 +132,6 @@ class WebConnectorCog(commands.Cog):
     async def sync_cache(self):
         await self.bot.wait_until_ready()
         await self.build_cache()
-        # check for changes, update if necessary
         for cacheGuildID in self.cache:
             for user in self.cache[cacheGuildID]["users"]:
                 t_roles = []
