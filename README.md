@@ -4,9 +4,18 @@ This is a Discord bot developed by BEMZlabs for ShapeStudio. The bot is designed
 
 ## Features
 
-- **Forum Thread Management**: Create, update, and delete forum threads.
-- **Note Management**: Add, edit, and delete notes for forum threads.
-- **Embed Management**: Create, edit, and delete embeds.
+- **Forum Thread Management**: 
+  - Create, update, and delete forum threads.
+  - Close forum threads.
+  - Assign and remove users from forum threads.
+  - List all users assigned to a forum thread.
+- **Note Management**: 
+  - Add, edit, and delete notes for forum threads.
+  - Change the default note for a forum channel.
+  - Refresh notes for all forum threads.
+- **Embed Management**: 
+  - Create, edit, and delete embeds.
+  - Show embeds.
 - **Periodic Updates**: Automatically update notes for all threads every 5 minutes.
 - **Permissions**: Manage permissions for different users.
 
@@ -53,17 +62,14 @@ This is a Discord bot developed by BEMZlabs for ShapeStudio. The bot is designed
 - **/forum default\_note**: Change the default note for a forum channel.
 - **/forum update**: Update the note for all forum threads.
 - **/forum close**: Close a forum thread.
+- **/assign add**: Assign a user to a forum thread.
+- **/assign remove**: Remove a user from a forum thread.
+- **/assign list**: List all users assigned to a forum thread.
 - **/embed create**: Create a new embed.
 - **/embed show**: Show an embed.
 - **/embed delete**: Delete an embed.
 - **/embed edit**: Edit an embed.
 - **/shard**: Get the shard ID and info for the current guild.
-
-### Event Listeners
-
-- **on\_ready**: Logs a message when the bot is ready.
-- **on\_thread\_create**: Handles the creation of new threads.
-- **on\_thread\_delete**: Handles the deletion of threads.
 
 ## License
 
