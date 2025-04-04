@@ -86,6 +86,8 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 intents = discord.Intents.default().all()
 if os.getenv("DEBUG_GUILDS"):
     bot = commands.AutoShardedBot(intents=intents, debug_guilds=[int(x) for x in os.getenv("DEBUG_GUILDS").split(",")])
+    os.environ["DEBUG"] = "True"
+    logger.info(f"STARTED IN DEBUG MODE\nDebug guilds: {os.getenv('DEBUG_GUILDS')}")
 else:
     bot = commands.AutoShardedBot(intents=intents)
 bot.logger = logger

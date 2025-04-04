@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import json
 import logging
+import os
 import re
 from copy import copy
 import discord
@@ -11,6 +12,7 @@ from discord.ext.pages import Paginator
 import utils
 import utils as util
 import pymysql as sql
+
 
 class NoteModal(discord.ui.Modal):
     """
@@ -37,8 +39,9 @@ class NoteModal(discord.ui.Modal):
         """
         await interaction.response.defer()
         new_note = interaction.data["components"][0]["components"][0]["value"]
-        utils.db_connector().execute(f"UPDATE {utils.table('threads')} SET note = %s, note_last_update = %s WHERE thread_id = %s",
-                                     (new_note, util.time_since_epoch(), interaction.channel.id))
+        utils.db_connector().execute(
+            f"UPDATE {utils.table('threads')} SET note = %s, note_last_update = %s WHERE thread_id = %s",
+            (new_note, util.time_since_epoch(), interaction.channel.id))
         utils.db_connector().commit()
         # update the note
         note = await util.get_note(interaction.channel)
@@ -50,7 +53,7 @@ class NoteModal(discord.ui.Modal):
 
 class DefaultNoteModal(NoteModal):
     """
-    A modal dialog for editing the default note of a channel.
+    A modal dialog for editing the template note of a channel.
 
     Attributes:
         channel_id (int): The ID of the channel.
@@ -82,7 +85,7 @@ class DefaultNoteModal(NoteModal):
                                      (json.dumps(settings), interaction.guild.id))
         utils.db_connector().commit()
         em = await util.build_forum_embed(note=new_note)
-        await interaction.followup.send("✔ `Default note has been modified!`", ephemeral=True, delete_after=15,
+        await interaction.followup.send("✔ `Template note has been modified!`", ephemeral=True, delete_after=15,
                                         embed=em)
         return True
 
@@ -112,9 +115,24 @@ class EditNoteButtonView(discord.ui.View):
             await interaction.respond("❌ `You do not have permission to assign users to this thread!`", ephemeral=True)
             return
         guild_members = copy(interaction.guild.members)
+        # remove bots, the thread owner and admins from the list, if there are more than 25 members
+        if len(guild_members) > 25 or utils.is_debug():
+            guild_members = [member for member in guild_members if not member.bot and
+                             member.id != interaction.channel.owner_id and
+                             not any([role.permissions.administrator for role in member.roles])]
+            if len(guild_members) == 0:
+                guild_members = copy(interaction.guild.members)
+            await interaction.respond("Assign a user to this thread\n-# **Some users have been removed to fit in the "
+                                      "limit of discord's dropdown menu. If you can't find a user, use the manual "
+                                      "assign button to assign them manually.**", view=UserSelectAssignView(
+                                        guild_members, interaction.followup,
+                                        await utils.get_thread_assigned_users(interaction.channel), self.bot,
+                                        self.logger), ephemeral=True)
+            return True
         await interaction.respond("Assign a user to this thread", view=UserSelectAssignView(
             guild_members, interaction.followup,
             await utils.get_thread_assigned_users(interaction.channel), self.bot, self.logger), ephemeral=True)
+        return True
 
 
 class UserSelectAssignView(discord.ui.View):
@@ -124,9 +142,18 @@ class UserSelectAssignView(discord.ui.View):
         self.logger = logger
         self.users = users
         self.followup = followup
+        print(len(self.build_assign_choices()))
         select = discord.ui.Select(placeholder="Select a user to assign", options=self.build_assign_choices(assigned),
-                                   min_values=1, max_values=len(self.build_assign_choices()))
+                                   min_values=1)
+
         select.callback = self.select_assign_user
+        if len(users) > 25 or utils.is_debug():
+            self.logger.warning(f"Too many users to build ({len(users)})! Capping to 25 and adding a other button")
+            self.users = self.users[:25]
+            button = discord.ui.Button(label="Manual Assign", style=discord.ButtonStyle.secondary,
+                                       custom_id="button_other_assign_user")
+            button.callback = self.button_other_assign_user
+            self.add_item(button)
         self.add_item(select)
 
     def build_assign_choices(self, assigned=None):
@@ -140,6 +167,53 @@ class UserSelectAssignView(discord.ui.View):
             else:
                 choices.append(discord.SelectOption(label=f"(Already Assigned) {user.name}", value=str(user.id)))
         return choices
+
+    async def button_other_assign_user(self, interaction: discord.Interaction):
+        # edit the message to show the user that they can mention users to assign them
+        await interaction.response.edit_message(content="`Mention a user to assign them to this thread.`\n-# If they "
+                                                        "are already assigned, they will be removed.",
+                                                view=None)
+
+        # wait for the user to mention a user
+        def check(m):
+            return m.author == interaction.user and m.channel == interaction.channel and len(m.mentions) > 0
+
+        try:
+            message = await self.bot.wait_for("message", check=check, timeout=60)
+        except asyncio.TimeoutError:
+            await interaction.followup.send("❌ `Timed out!`", ephemeral=True)
+            return
+        assigned = await utils.get_thread_assigned_users(interaction.channel)
+        unassigned = 0
+        for user in message.mentions:
+            if user.id in assigned:
+                unassigned += 1
+                assigned.remove(user.id)
+                # dm the user that they have been removed
+                if not await utils.safe_send(user,
+                                             f"❌ `You have been unassigned from the \"{interaction.channel.name}\" thread by {interaction.user.name}`"):
+                    self.logger.warning(f"Failed to send message to {user.name}")
+            else:
+                assigned.append(user.id)
+                if not await utils.safe_send(user, f"✔ `You have been assigned to the \"{interaction.channel.name}\" "
+                                                   f"thread by {interaction.user.name}`\n[Click here to view the "
+                                                   f"thread]({interaction.channel.jump_url})"):
+                    self.logger.warning(f"Failed to send message to {user.name}")
+        utils.db_connector().execute(
+            f"UPDATE {utils.table('threads')} SET assigned_discord_ids = %s WHERE thread_id = %s",
+            (json.dumps(assigned), interaction.channel.id))
+        utils.db_connector().commit()
+        # delete the interaction response
+        await interaction.delete_original_response()
+        await message.delete()
+        await interaction.followup.send(content=f"✔ ` {len(assigned)} User(s) assigned and {unassigned} unassigned!`",
+                                        delete_after=5)
+        # update the note
+        note = await util.get_note(interaction.channel)
+        m = await interaction.channel.fetch_message(note[2])
+        await m.edit(content=None, embed=await util.build_forum_embed(interaction.channel), view=EditNoteButtonView(
+            await util.get_all_allowed_users(interaction.channel), self.bot, self.logger))
+        return True
 
     async def select_assign_user(self, interaction: discord.Interaction):
         await interaction.response.defer()
@@ -164,8 +238,9 @@ class UserSelectAssignView(discord.ui.View):
                                                    f"thread]({interaction.channel.jump_url})"):
                     self.logger.warning(f"Failed to send message to {user.name}")
                 added += 1
-        utils.db_connector().execute(f"UPDATE {utils.table('threads')} SET assigned_discord_ids = %s WHERE thread_id = %s",
-                             (json.dumps(assigned), interaction.channel.id))
+        utils.db_connector().execute(
+            f"UPDATE {utils.table('threads')} SET assigned_discord_ids = %s WHERE thread_id = %s",
+            (json.dumps(assigned), interaction.channel.id))
         utils.db_connector().commit()
         await interaction.delete_original_response()
         if added == 0 and removed == 0:
@@ -237,7 +312,8 @@ class ThreadsCog(commands.Cog):
         """
         await self.bot.wait_until_ready()
         if channel:
-            utils.db_connector().execute(f"SELECT thread_id, note_id FROM {utils.table('threads')} WHERE channel_id = %s", (channel.id,))
+            utils.db_connector().execute(
+                f"SELECT thread_id, note_id FROM {utils.table('threads')} WHERE channel_id = %s", (channel.id,))
             threads = utils.db_connector().fetchall()
         else:
             utils.db_connector().execute(f"SELECT thread_id, note_id FROM {utils.table('threads')}")
@@ -254,7 +330,8 @@ class ThreadsCog(commands.Cog):
                     m = await t.fetch_message(thread[1])
                 except discord.errors.NotFound:
                     self.logger.warning(f"Note message {thread[1]} not found, deleting from database.")
-                    utils.db_connector().execute(f"DELETE FROM {utils.table('threads')} WHERE thread_id = %s", (thread[0],))
+                    utils.db_connector().execute(f"DELETE FROM {utils.table('threads')} WHERE thread_id = %s",
+                                                 (thread[0],))
                     utils.db_connector().commit()
                     continue
                 embed = await util.build_forum_embed(t)
@@ -293,7 +370,7 @@ class ThreadsCog(commands.Cog):
                 defaultNote = settings["defaultNote"]["default"]
             utils.db_connector().execute(
                 f"INSERT INTO {utils.table('threads')} (thread_id, channel_id, note, note_id, note_last_update) VALUES (%s, %s, %s, %s, %s);",
-                (thread.id, thread.parent.id, defaultNote, m.id,util.time_since_epoch())
+                (thread.id, thread.parent.id, defaultNote, m.id, util.time_since_epoch())
             )
             utils.db_connector().commit()
             await self.update_notes()
@@ -327,8 +404,14 @@ class ThreadsCog(commands.Cog):
             message.channel.parent.id  # Are we inside a thread?
         except AttributeError:
             return
-
+        # if the total amount of messages in this thread is less than 2, ignore the message
+        if message.channel.parent.id in await util.get_forum_channels(message.guild) and len(
+                await message.channel.history(limit=2).flatten()) < 2:
+            self.logger.info(f"Ignoring message in thread {message.channel.name} ({message.content}) (Too small)")
+            return
         if message.channel.parent.id in await util.get_forum_channels(message.guild):
+            # sleep for the bot latency to ensure the message is sent (bot latency is ms, sleep is in seconds)
+            await asyncio.sleep(self.bot.latency / 1000)
             self.logger.info(f"Trying to find note with an ID of {message.channel.id}")
             note = await util.get_note_message(message.channel)
             self.logger.info(f"Returned note: {note}")
@@ -340,9 +423,11 @@ class ThreadsCog(commands.Cog):
             if note_sent < (datetime.datetime.utcnow() - datetime.timedelta(hours=24)).timestamp():
                 new_note = await message.channel.send(embed=await util.build_forum_embed(message.channel),
                                                       view=EditNoteButtonView(
-                                                          await util.get_all_allowed_users(message.channel), self.bot, self.logger))
-                utils.db_connector().execute(f"UPDATE {utils.table('threads')} SET note_id = %s, note_last_update = %s WHERE thread_id = %s",
-                                     (new_note.id, util.time_since_epoch(), message.channel.id))
+                                                          await util.get_all_allowed_users(message.channel), self.bot,
+                                                          self.logger))
+                utils.db_connector().execute(
+                    f"UPDATE {utils.table('threads')} SET note_id = %s, note_last_update = %s WHERE thread_id = %s",
+                    (new_note.id, util.time_since_epoch(), message.channel.id))
                 utils.db_connector().commit()
 
     @commands.Cog.listener()
@@ -358,7 +443,7 @@ class ThreadsCog(commands.Cog):
             self.logger.info(f"Thread updated: {after.name}")
             if self.WARNING_COOLDOWN_MESSAGE is not None and (
                     after.name.replace("🔒 ", "").replace(" (Locked)", "") == before.name.replace("🔒 ", "").replace(
-                    " (Locked)", "") or
+                " (Locked)", "") or
                     after.name == before.name):
                 await self.WARNING_COOLDOWN_MESSAGE.delete()
                 self.WARNING_COOLDOWN_MESSAGE = None
@@ -400,7 +485,7 @@ class ThreadsCog(commands.Cog):
                         # create a task to rename the thread after the rate limit is lifted
                         try:
                             await self.rename_after_cooldown.start(after, after.name.replace("🔒 ", "")
-                                                                    .replace(" (Locked)", ""))
+                                                                   .replace(" (Locked)", ""))
                         except RuntimeError:
                             self.logger.warning("Rate limit task already running.")
                     self.logger.info(f"Thread {after.name} unlocked due to tag removal.")
@@ -480,14 +565,14 @@ class ThreadsCog(commands.Cog):
         modal = NoteModal(title=f"Edit note for {ctx.channel.parent.name}", note=note[0] if note else "No note found")
         await ctx.send_modal(modal)
 
-    @forum.command(name="default_note", description="Change the default note for a forum channel")
-    async def default_note(self, ctx: discord.ApplicationContext, channel: discord.ForumChannel):
+    @forum.command(name="template", description="Change the template for a forum channel")
+    async def template_note(self, ctx: discord.ApplicationContext, channel: discord.ForumChannel):
         """
-        Change the default note for a forum channel.
+        Change the template note for a forum channel.
 
         Args:
             ctx (discord.ApplicationContext): The context of the command.
-            channel (discord.ForumChannel): The channel to change the default note for.
+            channel (discord.ForumChannel): The channel to change the template note for.
         """
         if not await util.has_permission(ctx, "manage_threads") or \
                 not ctx.author.guild_permissions.manage_channels:
@@ -499,7 +584,7 @@ class ThreadsCog(commands.Cog):
             defaultNote = settings["defaultNote"][channel.id]
         except KeyError:
             defaultNote = settings["defaultNote"]["default"]
-        modal = DefaultNoteModal(title=util.limit(f"Edit default note for {channel.name}", 45),
+        modal = DefaultNoteModal(title=util.limit(f"Edit template note for {channel.name}", 45),
                                  note=defaultNote, channel_id=channel.id)
         await ctx.send_modal(modal)
 
@@ -561,8 +646,9 @@ class ThreadsCog(commands.Cog):
             await ctx.respond(f"❌ `User {user.name} is already assigned to this thread`", ephemeral=True)
             return
         assigned.append(user.id)
-        utils.db_connector().execute(f"UPDATE {utils.table('threads')} SET assigned_discord_ids = %s WHERE thread_id = %s",
-                                     (json.dumps(assigned), thread.id))
+        utils.db_connector().execute(
+            f"UPDATE {utils.table('threads')} SET assigned_discord_ids = %s WHERE thread_id = %s",
+            (json.dumps(assigned), thread.id))
         utils.db_connector().commit()
         await ctx.respond(f"✔ `User {user.name} has been assigned to thread {thread.name}`", ephemeral=True)
 
@@ -583,7 +669,7 @@ class ThreadsCog(commands.Cog):
                               delete_after=5)
             return
         utils.db_connector().execute(f"SELECT assigned_discord_ids FROM {utils.table('threads')} WHERE thread_id = %s",
-                              (thread.id,))
+                                     (thread.id,))
         assigned = utils.db_connector().fetchone()
         if not assigned:
             await ctx.respond("❌ `No users assigned to this thread`", ephemeral=True)
@@ -593,8 +679,9 @@ class ThreadsCog(commands.Cog):
             await ctx.respond(f"❌ `User {user.name} is not assigned to this thread`", ephemeral=True)
             return
         assigned.remove(user.id)
-        utils.db_connector().execute(f"UPDATE {utils.table('threads')} SET assigned_discord_ids = %s WHERE thread_id = %s",
-                         (json.dumps(assigned), thread.id))
+        utils.db_connector().execute(
+            f"UPDATE {utils.table('threads')} SET assigned_discord_ids = %s WHERE thread_id = %s",
+            (json.dumps(assigned), thread.id))
         utils.db_connector().commit()
         await ctx.respond(f"✔ `User {user.name} has been removed from thread {thread.name}`", ephemeral=True)
 

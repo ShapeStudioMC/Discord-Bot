@@ -264,7 +264,7 @@ def is_forum_post(ctx, thread: discord.Thread):
     return thread.id in forum_channels
 
 
-async def get_settings(guild: discord.Guild):
+async def get_settings(guild: discord.Guild, logger: logging.Logger = None):
     """
     Get the settings for a guild
 
@@ -281,8 +281,7 @@ async def get_settings(guild: discord.Guild):
     try:
         obj_settings = json.loads(settings[0])
     except json.JSONDecodeError:
-        print("Corrupt settings found for guild, creating new settings.")
-        print(settings[0])
+        logger.warning("Corrupt settings found for guild, creating new settings.")
         SQLManager.execute(f"UPDATE {table('guilds')} SET settings = %s WHERE guild_id = %s",
                            (json.dumps(DEFAULT_SETTINGS), guild.id))
         SQLManager.commit()
@@ -559,6 +558,8 @@ async def safe_send(user: discord.User | discord.Member, message: str):
     :param user: The user to send the message to
     :param message: The message to send
     """
+    if user.bot:
+        return True
     try:
         await user.send(message)
         return True
@@ -778,3 +779,12 @@ async def process_job(job: dict, bot: discord.bot, logger):
         return False
     finally:
         logger.debug(f"Finished processing job")
+
+
+def is_debug():
+    """
+    Check if the bot is running in debug mode
+
+    :return: True if the bot is running in debug mode, False otherwise
+    """
+    return os.getenv("DEBUG").lower() == "true"
