@@ -249,6 +249,13 @@ if __name__ == "__main__":
                   f"guildID BIGINT not null,"
                   f"DiscordRoles LONGTEXT  not null, "
                   f"LastUpdate TIMESTAMP not null);")
+        c.execute(f"CREATE TABLE IF NOT EXISTS `{os.getenv('JOBS_TABLE')}` ("
+                  f"id BIGINT NOT NULL PRIMARY KEY, "
+                  f"process_id VARCHAR(255), "
+                  f"payload LONGTEXT, "
+                  f"status VARCHAR(10), "
+                  f"priority INTEGER NOT NULL DEFAULT 0, "
+                  f"time_added TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);")
         database.commit()
     database.close()
     logging.info("Starting bot")

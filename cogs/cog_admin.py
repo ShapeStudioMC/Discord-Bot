@@ -31,17 +31,13 @@ class AdminCog(commands.Cog):
             embed.add_field(name="Version", value=utils.get_version())
         embed.add_field(name="Author", value="BEMZlabs")
         embed.add_field(name="Source", value="[GitHub](https://github.com/ShapedBuildingServer/Discord-Bot)")
+        embed.add_field(name="License", value="MIT")
+        embed.add_field(name="Git commit hashes", value="", inline=False)
+        git_commit_hash = utils.get_git_commit_hash()
+        if git_commit_hash != {}:
+            for key, value in git_commit_hash.items():
+                embed.add_field(name=key, value=f"`{value}`")
         await ctx.respond(embed=embed, ephemeral=True)
-
-    #@admin.command(name="force-refresh", description="Force a refresh of all notes")
-    #async def force_refresh(self, ctx: discord.ApplicationContext):
-    #    if not await utils.has_permission(ctx, "manage_local_permissions"):
-    #        await ctx.respond("❌ `You do not have permission to force a refresh`", ephemeral=True)
-    #        return
-    #    # todo: what the hell is this doing?
-    #    utils.db_connector().execute("UPDATE users SET notes = ''")
-    #    utils.db_connector().commit()
-    #    await ctx.respond("✔ `All notes have been cleared`", ephemeral=True)
 
     @permissions.command(name="show", description="Show a users permissions.")
     async def show(self, ctx: discord.ApplicationContext, member: discord.Member):

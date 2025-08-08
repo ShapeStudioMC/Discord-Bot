@@ -2,8 +2,9 @@ import json
 import logging
 import os
 import re
+from logging import exception
 from pprint import pprint
-
+import time
 import pymysql as sql
 import discord
 import datetime
@@ -31,13 +32,37 @@ HEX_REGEX = r"^(?:[0-9a-fA-F]{3}){1,2}$"
 
 class SQLManager:
     def __init__(self):
-        self.connection = sql.connect(
-            host=os.getenv('DATABASE_HOST'),
-            user=os.getenv('DATABASE_USER'),
-            password=os.getenv('DATABASE_PASSWORD'),
-            database=os.getenv('DATABASE_NAME')
-        )
-        self.cursor = self.connection.cursor()
+        """
+        Initialize the SQLManager with a connection to the database.
+        """
+        self.connection = None
+        self.cursor = None
+
+    def __is_connected(self):
+        """
+        Check if the connection to the database is still open.
+        """
+        if self.connection is None:
+            return False
+        try:
+            self.connection.ping(reconnect=True)
+            return True
+        except sql.OperationalError:
+            return False
+
+    def __connect(self):
+        """
+        Reconnect to the database if the connection is closed.
+        """
+        if not self.__is_connected():
+            self.connection = sql.connect(
+                host=os.getenv('DATABASE_HOST'),
+                user=os.getenv('DATABASE_USER'),
+                password=os.getenv('DATABASE_PASSWORD'),
+                database=os.getenv('DATABASE_NAME')
+            )
+            self.cursor = self.connection.cursor()
+
 
     def __enter__(self):
         return self.cursor
@@ -48,6 +73,10 @@ class SQLManager:
         self.connection.close()
 
     def execute(self, *args, **kwargs):
+        if not self.__is_connected():
+            self.__connect()
+        self.wait_for_connection()
+
         try:
             self.cursor.execute(*args, **kwargs)
         except pymysql.err.ProgrammingError as e:
@@ -74,7 +103,21 @@ class SQLManager:
     def close(self):
         self.cursor.close()
         self.connection.close()
+        self.connection = None
+        self.cursor = None
 
+    def wait_for_connection(self):
+        """
+        Wait for the connection to the database to be established.
+        This is useful for ensuring that the connection is open before executing any queries.
+        """
+        while not self.__is_connected():
+            print("Waiting for database connection...")
+            try:
+                self.__connect()
+            except Exception as e:
+                print(f"Waiting for database connection: {e}")
+                time.sleep(1)
 
 # Create an instance of the SQLManager class to use for database connections
 SQLManager = SQLManager()
@@ -788,3 +831,15 @@ def is_debug():
     :return: True if the bot is running in debug mode, False otherwise
     """
     return os.getenv("DEBUG").lower() == "true"
+
+
+def get_git_commit_hash():
+    """
+    Get the current git commit hash
+    :return dictionary: The commit hash, with the key as the branch name
+    """
+    branches = {}
+    for branch in os.listdir(".git/refs/heads"):
+        with open(f".git/refs/heads/{branch}") as f:
+            branches[branch] = f.read().strip()
+    return branches
