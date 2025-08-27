@@ -249,6 +249,28 @@ class WebConnectorCog(commands.Cog):
                                              (utils.to_json(t_roles), datetime.now(), user_id, guild_id))
                 utils.db_connector().commit()
 
+    def send_username_change_job(self, guild_id, user_id, old_username, new_username):
+        """
+        Send a job to the webapp (or jobs table) when a username changes.
+        """
+        import time
+        import utils
+        job = {
+            "endpoint": "username-changed",
+            "data": {
+                "guild_id": guild_id,
+                "user_id": user_id,
+                "old_username": old_username,
+                "new_username": new_username,
+                "timestamp": int(time.time())
+            }
+        }
+        db = utils.db_connector()
+        db.execute(f"INSERT INTO {os.getenv('JOBS_TABLE')} (process_id, payload, status, priority, time_added) VALUES (%s, %s, %s, %s, %s);",
+                   (utils.get_config("JOB_BOT_NAME"), utils.to_json(job), "pending", 0, datetime.now()))
+        db.commit()
+        self.logger.info(f"Queued username change job for user {user_id} in guild {guild_id}: {old_username} -> {new_username}")
+
 
 def setup(bot):
     bot.add_cog(WebConnectorCog(bot, logging.getLogger('main')))

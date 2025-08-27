@@ -250,7 +250,7 @@ if __name__ == "__main__":
                   f"DiscordRoles LONGTEXT  not null, "
                   f"LastUpdate TIMESTAMP not null);")
         c.execute(f"CREATE TABLE IF NOT EXISTS `{os.getenv('JOBS_TABLE')}` ("
-                  f"id BIGINT NOT NULL PRIMARY KEY, "
+                  f"id BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT, "
                   f"process_id VARCHAR(255), "
                   f"payload LONGTEXT, "
                   f"status VARCHAR(10), "
