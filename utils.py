@@ -827,35 +827,48 @@ async def process_job(job: dict, bot: discord.bot, logger, cache):
             if member:
                 # Support both 'new_roles' and 'new_role' for compatibility
                 new_roles = data.get("new_roles") or data.get("new_role") or []
-                # Remove all roles except @everyone
-                roles_to_remove = [role for role in member.roles if role.name != "@everyone"]
-                if roles_to_remove:
-                    try:
-                        await member.remove_roles(*roles_to_remove, reason=f"j{job.get('job_id', 'unknown')} - update roles (remove old roles)")
-                        logger.info(f"Removed old roles from {member.name} in {member.guild.name}")
-                    except discord.Forbidden as e:
-                        if hasattr(e, 'code') and e.code == 50013:
-                            logger.warning(f"Missing Permissions to remove roles from {member.name} in {member.guild.name}. Skipping role removal.")
-                        else:
-                            logger.error(f"Failed to remove roles from {member.name}: {e}")
-                            return False
-                    except Exception as e:
-                        logger.error(f"Failed to remove roles from {member.name}: {e}")
-                        return False
-                # Add new roles using cache
-                added_roles = []
-                missing_roles = []
+                # Build a name->id map for fast lookup
                 guild_cache = cache.get(member.guild.id, {})
                 cache_roles = guild_cache.get("roles", {})
-                # Build a name->id map for fast lookup
                 name_to_id = {v["name"]: k for k, v in cache_roles.items()}
-                for role_name in new_roles:
+                # Filter out '@everyone' from new_roles
+                filtered_new_roles = [r for r in new_roles if r != "@everyone"]
+                # Get current role names (excluding @everyone)
+                current_roles = [role for role in member.roles if role.name != "@everyone"]
+                current_role_names = set(role.name for role in current_roles)
+                # Roles to remove: currently assigned but not in new_roles
+                roles_to_remove = [role for role in current_roles if role.name not in filtered_new_roles]
+                # Roles to add: in new_roles but not currently assigned, filter out '@everyone' again for safety
+                roles_to_add = [role_name for role_name in filtered_new_roles if role_name not in current_role_names and role_name != "@everyone"]
+                # Remove roles
+                if roles_to_remove:
+                    for role in roles_to_remove:
+                        try:
+                            await member.remove_roles(role, reason=f"j{job.get('job_id', 'unknown')} - update roles (remove old roles)")
+                            logger.info(f"Removed role {role.name} from {member.name} in {member.guild.name}")
+                        except discord.Forbidden as e:
+                            if hasattr(e, 'code') and e.code == 50013:
+                                logger.warning(f"Missing Permissions to remove role {role.name} from {member.name} in {member.guild.name}. Skipping role removal.")
+                                continue
+                            else:
+                                logger.error(f"Failed to remove role {role.name} from {member.name}: {e}")
+                                return False
+                        except Exception as e:
+                            logger.error(f"Failed to remove role {role.name} from {member.name}: {e}")
+                            return False
+                # Add new roles
+                added_roles = []
+                missing_roles = []
+                for role_name in roles_to_add:
                     role_id = name_to_id.get(role_name)
+                    # Skip if role_name is '@everyone' or role_id is the guild id
+                    if role_name == "@everyone" or (role_id and str(role_id) == str(member.guild.id)):
+                        logger.info(f"Skipping attempt to add @everyone role to {member.name} in {member.guild.name}.")
+                        continue
                     if role_id:
                         role = discord.utils.get(member.guild.roles, id=role_id)
                         if role:
                             try:
-                                # j{JOB_ID} update roles from job queue
                                 await member.add_roles(role, reason=f"j{job.get('job_id', 'unknown')} - update roles from job queue")
                                 logger.info(f"Added role {role.name} to {member.name} in {member.guild.name}")
                                 added_roles.append(role.name)
@@ -881,8 +894,6 @@ async def process_job(job: dict, bot: discord.bot, logger, cache):
                     logger.error(f"Job failed: The following roles were not found in cache or could not be added for {member.guild.name}: {missing_roles}")
                     return False
                 return True
-        if job["endpoint"] == "NEXT_JOB":
-            ...
     except Exception as e:
         logger.error(f"Error processing job: {e}")
         return False
@@ -962,4 +973,3 @@ def get_git_commit_hash():
         with open(os.path.join(git_heads_path, branch)) as f:
             branches[branch] = f.read().strip()
     return branches
-
