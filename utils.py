@@ -803,15 +803,25 @@ async def process_job(job: dict, bot: discord.bot, logger):
             user = job["data"]["discord_username"]
             new_roles = job["data"]["new_roles"]
             for guild in guilds:
-                if guild.get_member_named(user):
-                    member = guild.get_member_named(user)
-                    for role in new_roles:
-                        role = discord.utils.get(guild.roles, name=role)
+                member = guild.get_member_named(user)
+                if member:
+                    # Remove all roles except @everyone
+                    roles_to_remove = [role for role in member.roles if role.name != "@everyone"]
+                    if roles_to_remove:
+                        await member.remove_roles(*roles_to_remove, reason="Received job - update roles (remove old roles)")
+                        logger.info(f"Removed old roles from {member.name} in {guild.name}")
+                    # Add new roles
+                    added_roles = []
+                    for role_name in new_roles:
+                        role = discord.utils.get(guild.roles, name=role_name)
                         if role:
                             await member.add_roles(role, reason=f"Received job - update roles")
                             logger.info(f"Added role {role.name} to {member.name} in {guild.name}")
+                            added_roles.append(role.name)
                         else:
-                            logger.warning(f"Role {role} not found in {guild.name}")
+                            logger.warning(f"Role {role_name} not found in {guild.name}")
+                    # Notify webapp
+                    notify_roles_updated(member.id, added_roles)
                     return True
                 else:
                     logger.warning(f"User {user} not found in {guild.name}")
@@ -824,13 +834,63 @@ async def process_job(job: dict, bot: discord.bot, logger):
         logger.debug(f"Finished processing job")
 
 
+def notify_username_changed(discord_id, old_username, new_username):
+    """
+    Notify the webapp that a username has changed.
+    """
+    url = "https://shapestudio.net/api/username-changed"
+    payload = {
+        "discord_id": discord_id,
+        "old_username": old_username,
+        "new_username": new_username
+    }
+    try:
+        response = requests.post(url, json=payload, timeout=5)
+        response.raise_for_status()
+    except Exception as e:
+        logging.error(f"Failed to notify username change: {e}")
+
+
+def notify_roles_updated(discord_id, new_roles):
+    """
+    Notify the webapp that a user's roles have been updated.
+    """
+    url = "https://shapestudio.net/api/update-user-roles"
+    payload = {
+        "discord_id": discord_id,
+        "new_roles": new_roles
+    }
+    try:
+        response = requests.post(url, json=payload, timeout=5)
+        response.raise_for_status()
+    except Exception as e:
+        logging.error(f"Failed to notify roles update: {e}")
+
+
+def send_bot_channel_message(guild, message, bot):
+    """
+    Send a message in the bot channel of the given guild.
+    """
+    # Try to find a channel named 'bot' or 'bot-commands', fallback to system_channel
+    channel = discord.utils.get(guild.text_channels, name="bot")
+    if not channel:
+        channel = discord.utils.get(guild.text_channels, name="bot-commands")
+    if not channel:
+        channel = guild.system_channel
+    if channel:
+        return bot.loop.create_task(channel.send(message))
+    else:
+        logging.warning(f"No bot channel found in guild {guild.name}")
+        return None
+
+
 def is_debug():
     """
     Check if the bot is running in debug mode
 
     :return: True if the bot is running in debug mode, False otherwise
     """
-    return os.getenv("DEBUG").lower() == "true"
+    return os.getenv("DEBUG", "false").lower() == "true"
 
 
 def get_git_commit_hash():
@@ -839,7 +899,11 @@ def get_git_commit_hash():
     :return dictionary: The commit hash, with the key as the branch name
     """
     branches = {}
-    for branch in os.listdir(".git/refs/heads"):
-        with open(f".git/refs/heads/{branch}") as f:
+    git_heads_path = os.path.join(".git", "refs", "heads")
+    if not os.path.exists(git_heads_path):
+        return branches
+    for branch in os.listdir(git_heads_path):
+        with open(os.path.join(git_heads_path, branch)) as f:
             branches[branch] = f.read().strip()
     return branches
+
