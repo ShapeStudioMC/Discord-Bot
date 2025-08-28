@@ -788,7 +788,7 @@ def sort_guilds(bot: discord.bot):
     return guilds
 
 
-async def process_job(job: dict, bot: discord.bot, logger):
+async def process_job(job: dict, bot: discord.bot, logger, cache):
     """
     Main subrutine for processing jobs
 
@@ -800,31 +800,69 @@ async def process_job(job: dict, bot: discord.bot, logger):
     try:
         if job["endpoint"] == "update-user-roles":
             guilds = sort_guilds(bot)
-            user = job["data"]["discord_username"]
-            new_roles = job["data"]["new_roles"]
-            for guild in guilds:
-                member = guild.get_member_named(user)
-                if member:
-                    # Remove all roles except @everyone
-                    roles_to_remove = [role for role in member.roles if role.name != "@everyone"]
-                    if roles_to_remove:
-                        await member.remove_roles(*roles_to_remove, reason="Received job - update roles (remove old roles)")
-                        logger.info(f"Removed old roles from {member.name} in {guild.name}")
-                    # Add new roles
-                    added_roles = []
-                    for role_name in new_roles:
-                        role = discord.utils.get(guild.roles, name=role_name)
+            data = job.get("data", {})
+            user = None
+            member = None
+            # Prefer discord_id, fallback to discord_username
+            if "discord_id" in data:
+                discord_id = data["discord_id"]
+                for guild in guilds:
+                    member = guild.get_member(discord_id)
+                    if member:
+                        break
+                if not member:
+                    logger.warning(f"User with discord_id {discord_id} not found in any guild.")
+            elif "discord_username" in data:
+                discord_username = data["discord_username"]
+                for guild in guilds:
+                    member = guild.get_member_named(discord_username)
+                    if member:
+                        break
+                if not member:
+                    logger.warning(f"User with discord_username {discord_username} not found in any guild.")
+            else:
+                logger.error(f"Job missing required field 'discord_id' or 'discord_username': {job}")
+                return False
+            # If member was found, process roles
+            if member:
+                # Support both 'new_roles' and 'new_role' for compatibility
+                new_roles = data.get("new_roles") or data.get("new_role") or []
+                # Remove all roles except @everyone
+                roles_to_remove = [role for role in member.roles if role.name != "@everyone"]
+                if roles_to_remove:
+                    await member.remove_roles(*roles_to_remove, reason="Received job - update roles (remove old roles)")
+                    logger.info(f"Removed old roles from {member.name} in {member.guild.name}")
+                # Add new roles using cache
+                added_roles = []
+                missing_roles = []
+                guild_cache = cache.get(member.guild.id, {})
+                cache_roles = guild_cache.get("roles", {})
+                # Build a name->id map for fast lookup
+                name_to_id = {v["name"]: k for k, v in cache_roles.items()}
+                for role_name in new_roles:
+                    role_id = name_to_id.get(role_name)
+                    if role_id:
+                        role = discord.utils.get(member.guild.roles, id=role_id)
                         if role:
-                            await member.add_roles(role, reason=f"Received job - update roles")
-                            logger.info(f"Added role {role.name} to {member.name} in {guild.name}")
-                            added_roles.append(role.name)
+                            try:
+                                await member.add_roles(role, reason=f"Received job - update roles")
+                                logger.info(f"Added role {role.name} to {member.name} in {member.guild.name}")
+                                added_roles.append(role.name)
+                            except Exception as e:
+                                logger.error(f"Failed to add role {role.name} to {member.name}: {e}")
+                                return False
                         else:
-                            logger.warning(f"Role {role_name} not found in {guild.name}")
-                    # Notify webapp
-                    notify_roles_updated(member.id, added_roles)
-                    return True
-                else:
-                    logger.warning(f"User {user} not found in {guild.name}")
+                            logger.warning(f"Role ID {role_id} not found in guild.roles for {role_name}")
+                            missing_roles.append(role_name)
+                    else:
+                        logger.warning(f"Role {role_name} not found in cache for {member.guild.name}")
+                        missing_roles.append(role_name)
+                # Notify webapp
+                notify_roles_updated(member.id, added_roles)
+                if missing_roles:
+                    logger.error(f"Job failed: The following roles were not found in cache for {member.guild.name}: {missing_roles}")
+                    return False
+                return True
         if job["endpoint"] == "NEXT_JOB":
             ...
     except Exception as e:

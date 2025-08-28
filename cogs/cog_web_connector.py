@@ -158,17 +158,19 @@ class WebConnectorCog(commands.Cog):
 
     @tasks.loop(seconds=int(utils.get_config("JOB_INTERVAL")))
     async def check_jobs(self):
+        print(f"Checking jobs at {datetime.now()}, name: {utils.get_config('JOB_BOT_NAME')}, table: {os.getenv('JOBS_TABLE')}")
         db = utils.db_connector()
         db.execute(f"SELECT * FROM {os.getenv('JOBS_TABLE')} WHERE {os.getenv('JOBS_TABLE')}.process_id = %s AND {os.getenv('JOBS_TABLE')}.status = %s;",
                    (utils.get_config("JOB_BOT_NAME"), "pending"))
         db.commit()  # Ensure the SELECT statement is committed
         jobs = db.fetchall()
+        print(f"Found {len(jobs)} jobs")
         jobs = sorted(jobs, key=lambda x: (x[4], x[5]))
         if len(jobs) > 0:
             await self.bot.wait_until_ready()
             for job in jobs:
                 self.logger.info(f"Processing job id {job[0]}")
-                status = await utils.process_job(utils.from_json(job[2]), self.bot, self.logger)
+                status = await utils.process_job(utils.from_json(job[2]), self.bot, self.logger, self.cache)
                 if status:
                     utils.db_connector().execute(f"UPDATE {os.getenv('JOBS_TABLE')} SET status = %s WHERE id = %s;", ("completed", job[0]))
                     utils.db_connector().commit()
