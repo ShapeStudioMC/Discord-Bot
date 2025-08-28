@@ -911,8 +911,9 @@ def notify_username_changed(discord_id, old_username, new_username):
         "old_username": old_username,
         "new_username": new_username
     }
+    headers = {"SS-API-KEY": os.getenv("WEBAPP_KEY", "")}
     try:
-        response = requests.post(url, json=payload, timeout=5)
+        response = requests.post(url, json=payload, headers=headers, timeout=5)
         response.raise_for_status()
     except Exception as e:
         logging.error(f"Failed to notify username change: {e}")
@@ -927,8 +928,9 @@ def notify_roles_updated(discord_id, new_roles):
         "discord_id": discord_id,
         "new_roles": new_roles
     }
+    headers = {"SS-API-KEY": os.getenv("WEBAPP_KEY", "")}
     try:
-        response = requests.post(url, json=payload, timeout=5)
+        response = requests.post(url, json=payload, headers=headers, timeout=5)
         response.raise_for_status()
     except Exception as e:
         logging.error(f"Failed to notify roles update: {e}")
