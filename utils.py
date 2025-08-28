@@ -830,8 +830,18 @@ async def process_job(job: dict, bot: discord.bot, logger, cache):
                 # Remove all roles except @everyone
                 roles_to_remove = [role for role in member.roles if role.name != "@everyone"]
                 if roles_to_remove:
-                    await member.remove_roles(*roles_to_remove, reason=f"j{job.get('job_id', 'unknown')} - update roles (remove old roles)")
-                    logger.info(f"Removed old roles from {member.name} in {member.guild.name}")
+                    try:
+                        await member.remove_roles(*roles_to_remove, reason=f"j{job.get('job_id', 'unknown')} - update roles (remove old roles)")
+                        logger.info(f"Removed old roles from {member.name} in {member.guild.name}")
+                    except discord.Forbidden as e:
+                        if hasattr(e, 'code') and e.code == 50013:
+                            logger.warning(f"Missing Permissions to remove roles from {member.name} in {member.guild.name}. Skipping role removal.")
+                        else:
+                            logger.error(f"Failed to remove roles from {member.name}: {e}")
+                            return False
+                    except Exception as e:
+                        logger.error(f"Failed to remove roles from {member.name}: {e}")
+                        return False
                 # Add new roles using cache
                 added_roles = []
                 missing_roles = []
@@ -850,7 +860,6 @@ async def process_job(job: dict, bot: discord.bot, logger, cache):
                                 logger.info(f"Added role {role.name} to {member.name} in {member.guild.name}")
                                 added_roles.append(role.name)
                             except discord.Forbidden as e:
-                                # Check for error code 50013 (Missing Permissions)
                                 if hasattr(e, 'code') and e.code == 50013:
                                     logger.warning(f"Missing Permissions to add role {role.name} to {member.name} in {member.guild.name}. Skipping this role.")
                                     continue
@@ -868,8 +877,8 @@ async def process_job(job: dict, bot: discord.bot, logger, cache):
                         missing_roles.append(role_name)
                 # Notify webapp
                 notify_roles_updated(member.id, added_roles)
-                if missing_roles:
-                    logger.error(f"Job failed: The following roles were not found in cache for {member.guild.name}: {missing_roles}")
+                if not added_roles and missing_roles:
+                    logger.error(f"Job failed: The following roles were not found in cache or could not be added for {member.guild.name}: {missing_roles}")
                     return False
                 return True
         if job["endpoint"] == "NEXT_JOB":
