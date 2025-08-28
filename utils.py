@@ -830,7 +830,7 @@ async def process_job(job: dict, bot: discord.bot, logger, cache):
                 # Remove all roles except @everyone
                 roles_to_remove = [role for role in member.roles if role.name != "@everyone"]
                 if roles_to_remove:
-                    await member.remove_roles(*roles_to_remove, reason="Received job - update roles (remove old roles)")
+                    await member.remove_roles(*roles_to_remove, reason=f"j{job.get('job_id', 'unknown')} - update roles (remove old roles)")
                     logger.info(f"Removed old roles from {member.name} in {member.guild.name}")
                 # Add new roles using cache
                 added_roles = []
@@ -845,9 +845,18 @@ async def process_job(job: dict, bot: discord.bot, logger, cache):
                         role = discord.utils.get(member.guild.roles, id=role_id)
                         if role:
                             try:
-                                await member.add_roles(role, reason=f"Received job - update roles")
+                                # j{JOB_ID} update roles from job queue
+                                await member.add_roles(role, reason=f"j{job.get('job_id', 'unknown')} - update roles from job queue")
                                 logger.info(f"Added role {role.name} to {member.name} in {member.guild.name}")
                                 added_roles.append(role.name)
+                            except discord.Forbidden as e:
+                                # Check for error code 50013 (Missing Permissions)
+                                if hasattr(e, 'code') and e.code == 50013:
+                                    logger.warning(f"Missing Permissions to add role {role.name} to {member.name} in {member.guild.name}. Skipping this role.")
+                                    continue
+                                else:
+                                    logger.error(f"Failed to add role {role.name} to {member.name}: {e}")
+                                    return False
                             except Exception as e:
                                 logger.error(f"Failed to add role {role.name} to {member.name}: {e}")
                                 return False

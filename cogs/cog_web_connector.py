@@ -253,5 +253,23 @@ class WebConnectorCog(commands.Cog):
                                              (utils.to_json(t_roles), datetime.now(), user_id, guild_id))
                 utils.db_connector().commit()
 
+    def get_cached_user(self, guild_id, discord_id=None, discord_username=None, discriminator=None):
+        """
+        Look up a user in the cache by discord_id first, then by username (and optionally discriminator).
+        Returns the user dict if found, else None.
+        """
+        if guild_id not in self.cache or "users" not in self.cache[guild_id]:
+            return None
+        users = self.cache[guild_id]["users"]
+        # Try by discord_id first
+        if discord_id is not None and discord_id in users:
+            return users[discord_id]
+        # Fallback: search by username (and optionally discriminator)
+        for user_id, user_data in users.items():
+            if discord_username is not None and user_data.get("username") == discord_username:
+                if discriminator is None or user_data.get("discriminator") == discriminator:
+                    return user_data
+        return None
+
 def setup(bot):
     bot.add_cog(WebConnectorCog(bot, logging.getLogger('main')))
